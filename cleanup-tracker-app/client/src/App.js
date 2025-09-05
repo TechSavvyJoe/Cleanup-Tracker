@@ -1,16 +1,77 @@
 import React from 'react';
-import { BrowserRouter as Router, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
+import { Provider } from 'react-redux';
+import { createStore, applyMiddleware, compose } from 'redux';
+import thunk from 'redux-thunk';
+
+import rootReducer from './reducers';
+import { setCurrentUser, logoutUser } from './actions/authActions';
+import setAuthToken from './utils/setAuthToken';
+import jwt_decode from 'jwt-decode';
+
 import FirebaseV2 from './pages/FirebaseV2';
+import Login from './components/auth/Login';
+import Register from './components/auth/Register';
+import Dashboard from './pages/Dashboard';
+import ManagerDashboard from './pages/ManagerDashboard';
+import DetailerPage from './pages/DetailerPage';
+import PrivateRoute from './components/private-route/PrivateRoute';
+import Navbar from './components/layout/Navbar';
+import Landing from './components/layout/Landing';
 
 import './App.css';
 
+const initialState = {};
+const middleware = [thunk];
+const store = createStore(
+  rootReducer,
+  initialState,
+  compose(
+    applyMiddleware(...middleware),
+    typeof window !== 'undefined' && window.__REDUX_DEVTOOLS_EXTENSION__ 
+      ? window.__REDUX_DEVTOOLS_EXTENSION__() 
+      : f => f
+  )
+);
+
+// Check for token to keep user logged in
+if (localStorage.jwtToken) {
+  // Set auth token header auth
+  const token = localStorage.jwtToken;
+  setAuthToken(token);
+  // Decode token and get user info and exp
+  const decoded = jwt_decode(token);
+  // Set user and isAuthenticated
+  store.dispatch(setCurrentUser(decoded));
+
+  // Check for expired token
+  const currentTime = Date.now() / 1000; // to get in milliseconds
+  if (decoded.exp < currentTime) {
+    // Logout user
+    store.dispatch(logoutUser());
+    // Redirect to login
+    window.location.href = './login';
+  }
+}
+
 function App() {
   return (
-    <Router>
-      <div className="App">
-        <Route exact path={["/", "/v2"]} component={FirebaseV2} />
-      </div>
-    </Router>
+    <Provider store={store}>
+      <Router>
+        <div className="App">
+          <Navbar />
+          <Switch>
+            <Route exact path="/" component={Landing} />
+            <Route exact path="/register" component={Register} />
+            <Route exact path="/login" component={Login} />
+            <Route exact path="/v2" component={FirebaseV2} />
+            <PrivateRoute exact path="/dashboard" component={Dashboard} />
+            <PrivateRoute exact path="/manager" component={ManagerDashboard} />
+            <PrivateRoute exact path="/detailer" component={DetailerPage} />
+          </Switch>
+        </div>
+      </Router>
+    </Provider>
   );
 }
 
