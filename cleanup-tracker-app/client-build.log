@@ -1,0 +1,26 @@
+
+> cleanup-tracker-client@0.1.0 build
+> react-scripts build
+
+Creating an optimized production build...
+Compiled successfully.
+
+File sizes after gzip:
+
+  71.61 KB  build/static/js/2.a887afed.chunk.js
+  8.3 KB    build/static/js/main.3843a42b.chunk.js
+  787 B     build/static/js/runtime-main.76558e18.js
+  415 B     build/static/css/main.883fffe8.chunk.css
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
