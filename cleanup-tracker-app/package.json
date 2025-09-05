@@ -3,11 +3,16 @@
   "private": true,
   "version": "1.0.0",
   "description": "Top-level controls for Cleanup Tracker app (client + server)",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
   "scripts": {
     "install:all": "npm --prefix client install && npm --prefix server install",
     "build": "npm --prefix client run build",
     "start:prod": "npm --prefix server run start:prod",
     "start": "npm run start:prod",
-    "start:dev": "npm --prefix server run dev"
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm start --prefix client"
   }
 }
