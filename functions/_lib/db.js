@@ -37,6 +37,26 @@ export async function ensureSchema(DB) {
     CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date);
     CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber);
   `);
+
+  // Auto-seed default users on first run (idempotent)
+  try {
+    const { results } = await DB.prepare('SELECT COUNT(1) as c FROM users').all();
+    const count = (results && results[0] && results[0].c) || 0;
+    if (count === 0) {
+      const defaults = [
+        { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+        { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
+        { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+      ];
+      for (const u of defaults) {
+        await DB.prepare('INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password) VALUES (?1,?2,?3,?4,?5,?6,?7)')
+          .bind(u.id, u.name, u.pin, u.role, u.uid, u.username, u.password)
+          .run();
+      }
+    }
+  } catch (e) {
+    // ignore seed errors; normal API can still handle manual seeding
+  }
 }
 
 export async function qAll(DB, sql, params = []) {
