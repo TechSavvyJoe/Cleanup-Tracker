@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Top-level controls for Cleanup Tracker app (client + server)",
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^3.5.1"
   },
   "scripts": {
     "install:all": "npm --prefix client install && npm --prefix server install",
@@ -14,5 +14,8 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm start --prefix client"
+  },
+  "dependencies": {
+    "mongodb": "^6.19.0"
   }
 }
