@@ -73,6 +73,12 @@ export async function ensureSchema(DB) {
     PRIMARY KEY (jobId, userId)
   );`);
   await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobtech_user ON job_technicians(userId);`);
+  // Extend job_technicians with per-technician timing fields
+  await ensureColumns(DB, 'job_technicians', [
+    'startedAt TEXT',
+    'endedAt TEXT',
+    'duration INTEGER'
+  ]);
   await DB.exec(`CREATE TABLE IF NOT EXISTS job_events (
     id TEXT PRIMARY KEY,
     jobId TEXT,

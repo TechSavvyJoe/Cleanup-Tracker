@@ -112,13 +112,15 @@ export default function FirebaseV2() {
       }
     };
 
-    const fetchJobs = async () => {
+  const fetchJobs = async () => {
       try {
         const res = await V2.get('/jobs');
         const list = (res.data || []).map(j => ({
           id: j._id,
           technicianId: j.technicianId,
           technicianName: j.technicianName,
+          assignedTechnicianIds: j.assignedTechnicianIds || [],
+          techTimers: j.techTimers || {},
           vin: j.vin,
           stockNumber: j.stockNumber,
           vehicleDescription: j.vehicleDescription,
@@ -131,7 +133,16 @@ export default function FirebaseV2() {
         }));
         setJobs(list);
       } catch (e) {
-        setError(prev => prev || 'Failed to load jobs from server.');
+        try {
+          const diag = await V2.get('/diag');
+          if (!diag.data?.dbBound) {
+            setError('Failed to load jobs: database not bound. In Cloudflare Pages → Settings → Functions → D1 bindings, attach your D1 database with binding name "DB", then redeploy.');
+          } else {
+            setError(prev => prev || 'Failed to load jobs from server.');
+          }
+        } catch {
+          setError(prev => prev || 'Failed to load jobs from server.');
+        }
       }
     };
 
@@ -280,7 +291,7 @@ function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
   const [loadingVehicle, setLoadingVehicle] = useState(false);
   const [jobType, setJobType] = useState('Detail');
   const [isScanning, setIsScanning] = useState(false);
-  const activeJob = useMemo(() => jobs.find(j => (j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)) && j.status === 'In Progress'), [jobs, user.uid]);
+  const activeJob = useMemo(() => jobs.find(j => (j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)) && j.status === 'In Progress' && (j.techTimers?.[user.uid]?.endedAt ? false : true)), [jobs, user.uid]);
   const coTechOptions = useMemo(() => Object.values(users).filter(u => u.role === 'detailer' && u.uid !== user.uid), [users, user.uid]);
   const [coTechId, setCoTechId] = useState('');
 
@@ -343,8 +354,28 @@ function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
     catch (e) { console.error(e); setError('Failed to complete job in database.'); }
   };
 
+  const handleJoinExistingJob = async () => {
+    if (!vehicle) return;
+    try {
+      await V2.put('/vehicles/join-by-vin', { vin: vehicle.vin, userId: user.uid });
+      resetForm();
+    } catch (e) {
+      console.error(e);
+      setError(e?.response?.data?.error || 'Failed to join job for this VIN.');
+    }
+  };
+
+  const handleStopMyTimer = async (jobId) => {
+    try {
+      await V2.put(`/jobs/${jobId}/stop`, { userId: user.uid });
+    } catch (e) {
+      console.error(e);
+      setError(e?.response?.data?.error || 'Failed to stop timer.');
+    }
+  };
+
   const resetForm = () => { setSearchTerm(''); setVehicle(null); setError(''); };
-  if (activeJob) return <ActiveJobCard activeJob={activeJob} onComplete={handleCompleteJob} />;
+  if (activeJob) return <ActiveJobCard activeJob={activeJob} onComplete={handleCompleteJob} onStopMyTimer={() => handleStopMyTimer(activeJob.id)} myTimerStart={activeJob.techTimers?.[user.uid]?.startedAt} />;
   return (
     <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg space-y-4">
       <h2 className="text-2xl font-bold text-center text-gray-800">Start New Job</h2>
@@ -382,7 +413,10 @@ function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
                 {coTechOptions.map(ct => <option key={ct.uid} value={ct.uid}>{ct.name}</option>)}
               </select>
             </div>
-            <button onClick={handleStartJob} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Start Job</button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button onClick={handleStartJob} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Start New Job</button>
+              <button onClick={handleJoinExistingJob} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg">Join In-Progress</button>
+            </div>
           </div>
         )}
       </>
@@ -390,13 +424,14 @@ function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
   );
 }
 
-function ActiveJobCard({ activeJob, onComplete }) {
+function ActiveJobCard({ activeJob, onComplete, onStopMyTimer, myTimerStart }) {
   const [elapsedTime, setElapsedTime] = useState('');
   useEffect(() => {
-    if (!activeJob?.startTime) return;
-    const timer = setInterval(() => setElapsedTime(formatDuration(new Date() - new Date(activeJob.startTime))), 1000);
+    const startRef = myTimerStart ? new Date(myTimerStart) : new Date(activeJob.startTime);
+    if (!startRef) return;
+    const timer = setInterval(() => setElapsedTime(formatDuration(new Date() - startRef)), 1000);
     return () => clearInterval(timer);
-  }, [activeJob]);
+  }, [activeJob, myTimerStart]);
   return (
     <div className="max-w-lg mx-auto bg-yellow-50 border-2 border-yellow-400 p-6 rounded-xl shadow-lg text-center space-y-4">
       <h2 className="text-2xl font-bold text-yellow-800">Job In Progress</h2>
@@ -409,7 +444,10 @@ function ActiveJobCard({ activeJob, onComplete }) {
         <p className="text-lg font-medium text-yellow-800">Elapsed Time</p>
         <p className="text-4xl font-bold text-yellow-900 tracking-wider font-mono">{elapsedTime}</p>
       </div>
-      <button onClick={onComplete} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg">Complete Job</button>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <button onClick={onStopMyTimer} className="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 px-4 rounded-lg">Stop My Timer</button>
+        <button onClick={onComplete} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg">Complete Job</button>
+      </div>
     </div>
   );
 }

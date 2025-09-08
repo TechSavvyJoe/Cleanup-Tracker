@@ -109,9 +109,13 @@ export async function onRequest(context) {
         try {
           const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
           // Fetch assignments
-          const links = await qAll(DB, 'SELECT jobId, userId FROM job_technicians');
-          const byJob = links.reduce((m, r) => { (m[r.jobId] ||= []).push(r.userId); return m; }, {});
-          return json(rows.map(r => toJobDto(r, byJob[r.id] || [])));
+          const links = await qAll(DB, 'SELECT jobId, userId, startedAt, endedAt, duration FROM job_technicians');
+          const byJob = links.reduce((m, r) => {
+            (m[r.jobId] ||= { ids: [], timers: {} });
+            m[r.jobId].ids.push(r.userId);
+            m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: r.duration ?? null };
+            return m; }, {});
+          return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
         } catch (err) {
           // If the table isn't ready yet for some reason, ensure schema and return empty list instead of failing UI
           if ((err?.message || '').includes('no such table')) {
@@ -135,7 +139,9 @@ export async function onRequest(context) {
         const techs = [body.technicianId, ...(Array.isArray(body.coTechnicianIds) ? body.coTechnicianIds : [])]
           .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
         for (const t of techs) {
-          await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [idv, t, now.toISOString()]);
+          const isPrimary = t === body.technicianId;
+          const startedAt = isPrimary ? now.toISOString() : null;
+          await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt, startedAt) VALUES (?1,?2,?3,?4)', [idv, t, now.toISOString(), startedAt]);
         }
         // job event
         await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
@@ -152,6 +158,56 @@ export async function onRequest(context) {
           [crypto.randomUUID(), id, 'job_completed', JSON.stringify({ duration }), end.toISOString()]);
         return ok();
       }
+    }
+
+    // Technician join/stop endpoints
+    if (segment === 'jobs' && id && sub === 'join' && method === 'PUT') {
+      const body = await request.json().catch(() => ({}));
+      const userId = body?.userId;
+      if (!userId) return bad('userId required', 400);
+      const now = new Date().toISOString();
+      // ensure assignment exists
+      await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [id, userId, now]);
+      // start timer only if not already started
+      const link = await qGet(DB, 'SELECT startedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      if (!link?.startedAt) {
+        await qRun(DB, 'UPDATE job_technicians SET startedAt = ?1 WHERE jobId = ?2 AND userId = ?3', [now, id, userId]);
+        await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
+          [crypto.randomUUID(), id, 'tech_joined', JSON.stringify({ userId }), now, userId]);
+      }
+      return ok();
+    }
+    if (segment === 'jobs' && id && sub === 'stop' && method === 'PUT') {
+      const body = await request.json().catch(() => ({}));
+      const userId = body?.userId;
+      if (!userId) return bad('userId required', 400);
+      const link = await qGet(DB, 'SELECT startedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      if (!link?.startedAt) return bad('timer not started for this tech', 409);
+      const now = new Date();
+      const duration = now - new Date(link.startedAt);
+      await qRun(DB, 'UPDATE job_technicians SET endedAt = ?1, duration = ?2 WHERE jobId = ?3 AND userId = ?4', [now.toISOString(), duration, id, userId]);
+      await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
+        [crypto.randomUUID(), id, 'tech_stopped', JSON.stringify({ userId, duration }), now.toISOString(), userId]);
+      return ok();
+    }
+
+    // Join by VIN helper: find latest in-progress job by VIN and join
+    if (segment === 'vehicles' && path[1] === 'join-by-vin' && method === 'PUT') {
+      const body = await request.json().catch(() => ({}));
+      const { vin, userId } = body || {};
+      if (!vin || !userId) return bad('vin and userId required', 400);
+      const job = await qGet(DB, 'SELECT id FROM jobs WHERE UPPER(vin) = ?1 AND status = ?2 ORDER BY startTime DESC LIMIT 1', [vin.toUpperCase(), 'In Progress']);
+      if (!job?.id) return bad('No in-progress job found for VIN', 404);
+      // Reuse join logic
+      const now = new Date().toISOString();
+  await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [job.id, userId, now]);
+      const link = await qGet(DB, 'SELECT startedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [job.id, userId]);
+      if (!link?.startedAt) {
+        await qRun(DB, 'UPDATE job_technicians SET startedAt = ?1 WHERE jobId = ?2 AND userId = ?3', [now, job.id, userId]);
+        await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
+          [crypto.randomUUID(), job.id, 'tech_joined', JSON.stringify({ userId, via: 'vin' }), now, userId]);
+      }
+  return json({ jobId: job.id });
     }
 
     // Vehicles
@@ -223,12 +279,13 @@ export async function onRequest(context) {
   }
 }
 
-function toJobDto(j, assignedIds = []) {
+function toJobDto(j, assignedIds = [], techTimers = {}) {
   return {
     _id: j.id,
     technicianId: j.technicianId,
     technicianName: j.technicianName,
   assignedTechnicianIds: assignedIds,
+  techTimers,
     vin: j.vin,
     stockNumber: j.stockNumber,
     vehicleDescription: j.vehicleDescription,
