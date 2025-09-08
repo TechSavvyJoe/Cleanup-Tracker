@@ -14,6 +14,14 @@ function autodetectD1(env) {
 
 export async function onRequest(context) {
   const { request, env, params } = context;
+  // Handle CORS preflight quickly
+  if (request.method.toUpperCase() === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'access-control-allow-headers': 'Content-Type'
+    }});
+  }
   const DB = autodetectD1(env);
   if (!DB) {
     return bad('D1 binding missing. In Cloudflare Pages → Settings → Functions → D1 bindings, bind your database with the binding name DB.', 500);

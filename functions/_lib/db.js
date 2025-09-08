@@ -1,7 +1,6 @@
 export async function ensureSchema(DB) {
-  // Create tables if not exist. D1 supports IF NOT EXISTS.
-  await DB.exec(`
-    CREATE TABLE IF NOT EXISTS users (
+  // Create tables if not exist. Execute statements individually for broader compatibility.
+  await DB.exec(`CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       pin TEXT,
@@ -11,16 +10,16 @@ export async function ensureSchema(DB) {
       password TEXT,
       UNIQUE(pin),
       UNIQUE(username)
-    );
-    CREATE TABLE IF NOT EXISTS vehicles (
+    );`);
+  await DB.exec(`CREATE TABLE IF NOT EXISTS vehicles (
       vin TEXT PRIMARY KEY,
       stockNumber TEXT,
       vehicleDescription TEXT,
       year INTEGER,
       make TEXT,
       model TEXT
-    );
-    CREATE TABLE IF NOT EXISTS jobs (
+    );`);
+  await DB.exec(`CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       technicianId TEXT,
       technicianName TEXT,
@@ -33,10 +32,9 @@ export async function ensureSchema(DB) {
       duration INTEGER,
       status TEXT,
       date TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date);
-    CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber);
-  `);
+    );`);
+  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date);`);
+  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber);`);
 
   // Auto-seed default users on first run (idempotent)
   try {
@@ -81,7 +79,12 @@ export async function qRun(DB, sql, params = []) {
 export function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+    headers: {
+      'content-type': 'application/json',
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'access-control-allow-headers': 'Content-Type'
+    },
   });
 }
 
