@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
+import VinScanner from '../components/VinScanner';
 
 // REST API base
 const API_BASE = process.env.REACT_APP_API_URL || '';
@@ -40,7 +41,7 @@ export default function FirebaseV2() {
     } catch { /* ignore */ }
   }, []);
 
-  // Load external libraries used for scanner/exports
+  // Load external libraries used for exports (scanner handled by component now)
   useEffect(() => {
     const loadLibraries = async () => {
       const loadScript = (src, id) => new Promise((resolve, reject) => {
@@ -51,7 +52,6 @@ export default function FirebaseV2() {
       });
       try {
         await Promise.all([
-          loadScript('https://unpkg.com/html5-qrcode', 'html5-qrcode-script'),
           loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf-script'),
           loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js', 'jspdf-autotable-script'),
           loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'xlsx-script')
@@ -87,12 +87,26 @@ export default function FirebaseV2() {
     const fetchUsers = async () => {
       try {
         const res = await V2.get('/users');
-        setUsers(normalizeUsers(res.data || []));
+        const data = res.data || [];
+        if (!Array.isArray(data) || data.length === 0) {
+          // If no users exist yet, seed defaults then reload
+          try {
+            await V2.post('/seed-users');
+            const res2 = await V2.get('/users');
+            setUsers(normalizeUsers(res2.data || []));
+          } catch (seedErr) {
+            setError(prev => prev || 'Failed to seed users on server.');
+          }
+        } else {
+          setUsers(normalizeUsers(data));
+        }
       } catch (e) {
-        // try seeding once then reload
-        try { await V2.post('/seed-users'); const res = await V2.get('/users'); setUsers(normalizeUsers(res.data || [])); }
-        catch {
-          // ignore further errors; show a soft error once
+        // network/API failure: try seeding once then reload
+        try {
+          await V2.post('/seed-users');
+          const res = await V2.get('/users');
+          setUsers(normalizeUsers(res.data || []));
+        } catch {
           setError(prev => prev || 'Failed to load users from server.');
         }
       }
@@ -266,7 +280,6 @@ function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
   const [loadingVehicle, setLoadingVehicle] = useState(false);
   const [jobType, setJobType] = useState('Detail');
   const [isScanning, setIsScanning] = useState(false);
-  const scannerRef = useRef(null);
   const activeJob = useMemo(() => jobs.find(j => j.technicianId === user.uid && j.status === 'In Progress'), [jobs, user.uid]);
 
   const handleSearch = React.useCallback(async (term) => {
@@ -285,25 +298,21 @@ function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
     }
   }, [isScanning]);
 
-  useEffect(() => {
-    if (isScanning && isScannerLoaded) {
-      // Html5Qrcode exposed by loaded script
-      // eslint-disable-next-line no-undef
-      scannerRef.current = new window.Html5Qrcode('vin-scanner');
-      const startScanner = async () => {
-        try {
-          await scannerRef.current.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 250, height: 150 } },
-            (decodedText) => handleSearch(decodedText),
-            () => {}
-          );
-        } catch (err) { setError('Could not start scanner. Grant camera permissions.'); setIsScanning(false); }
-      };
-      startScanner();
-    }
-    return () => { if (scannerRef.current?.isScanning) scannerRef.current.stop().catch(() => {}); };
-  }, [isScanning, isScannerLoaded, handleSearch]);
+  // Normalize VIN-like codes: strip spaces, make uppercase, and keep last 17 when QR contains prefixed text
+  const normalizeVinCandidate = (str) => {
+    if (!str) return '';
+    const s = String(str).trim().toUpperCase();
+    // If QR contains key:value pairs, try to find 17-char VIN substring
+    const vinMatch = s.match(/[A-HJ-NPR-Z0-9]{17}/); // VIN excludes I,O,Q
+    if (vinMatch) return vinMatch[0];
+    // Otherwise, return as-is for stock or short queries
+    return s;
+  };
+
+  const handleScan = (text) => {
+    const normalized = normalizeVinCandidate(text);
+    handleSearch(normalized);
+  };
 
   const handleStartJob = async () => {
     if (!vehicle) return;
@@ -339,11 +348,11 @@ function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
       <>
         {isScanning ? (
           <div>
-            <div id="vin-scanner" className="w-full rounded-lg border-2 border-dashed border-gray-400 p-2"></div>
+            <VinScanner onScanSuccess={handleScan} />
             <button onClick={() => setIsScanning(false)} className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg">Cancel Scan</button>
           </div>
         ) : (
-          <button onClick={() => setIsScanning(true)} disabled={!isScannerLoaded} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center space-x-2 disabled:bg-blue-300">{!isScannerLoaded ? 'Loading Scanner...' : 'Scan VIN Barcode'}</button>
+          <button onClick={() => setIsScanning(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center space-x-2">Scan VIN / QR / Barcode</button>
         )}
         <div className="relative"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300" /></div><div className="relative flex justify-center"><span className="px-2 bg-white text-sm text-gray-500">OR</span></div></div>
         <form onSubmit={e => { e.preventDefault(); handleSearch(searchTerm); }} className="space-y-2">
@@ -449,6 +458,8 @@ function ManagerDashboard({ jobs, librariesLoaded }) {
   const [filters, setFilters] = useState({ employee: 'All', service: 'All', dateRange: 'today' });
   const [customDate, setCustomDate] = useState('');
   const [exporting, setExporting] = useState({ pdf: false, excel: false });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState('');
   const uniqueEmployees = useMemo(() => ['All', ...new Set(jobs.map(j => j.technicianName).sort())], [jobs]);
   const serviceTypes = ['All', 'Detail', 'Delivery', 'Rewash', 'Lot Car', 'FCTP', 'Cleanup'];
 
@@ -479,6 +490,22 @@ function ManagerDashboard({ jobs, librariesLoaded }) {
   const chartData = useMemo(() => Object.entries(filteredJobs.reduce((acc, job) => ({...acc, [job.technicianName]: (acc[job.technicianName] || 0) + 1 }), {})).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count), [filteredJobs]);
   const jobsInProgress = useMemo(() => filteredJobs.filter(j => j.status === 'In Progress').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
   const jobsCompleted = useMemo(() => filteredJobs.filter(j => j.status === 'Completed').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
+
+  const refreshInventory = async () => {
+    setRefreshing(true);
+    setRefreshMsg('');
+    try {
+      const res = await V2.post('/vehicles/refresh');
+      const { upserted = 0, modified = 0, total = 0 } = res.data || {};
+      setRefreshMsg(`Inventory refreshed. Upserted: ${upserted}, Modified: ${modified}, Total: ${total}.`);
+    } catch (e) {
+      setRefreshMsg('Inventory refresh failed.');
+    } finally {
+      setRefreshing(false);
+      // Auto-hide message after a short delay
+      setTimeout(() => setRefreshMsg(''), 4000);
+    }
+  };
 
   const exportToPDF = (data) => {
     if (!librariesLoaded || !window.jspdf || !window.jspdf.jsPDF) return;
@@ -523,7 +550,23 @@ function ManagerDashboard({ jobs, librariesLoaded }) {
         <KpiCard title="Avg. Duration" value={kpiData.avgDuration} colorClass="bg-green-100 text-green-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"></path>} />
         <KpiCard title="Top Employee" value={kpiData.topEmployee} colorClass="bg-indigo-100 text-indigo-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>} />
       </div>
-      <div className="bg-white p-4 rounded-xl shadow-lg space-y-3"><h3 className="font-semibold text-gray-700">Filter Options</h3><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"><select value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm"><option value="today">Today</option><option value="7days">Last 7 Days</option><option value="30days">Last 30 Days</option><option value="custom">Custom Date</option></select>{filters.dateRange === 'custom' && <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)} className="p-2 border border-gray-300 rounded-md shadow-sm"/>}<select value={filters.employee} onChange={e => setFilters({...filters, employee: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{uniqueEmployees.map(e => <option key={e} value={e}>{e}</option>)}</select><select value={filters.service} onChange={e => setFilters({...filters, service: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{serviceTypes.map(s => <option key={s} value={s}>{s}</option>)}</select></div></div>
+      <div className="bg-white p-4 rounded-xl shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-700">Filter Options</h3>
+          <div className="flex items-center space-x-2">
+            <button onClick={refreshInventory} disabled={refreshing} className="bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400">
+              {refreshing ? 'Refreshing…' : 'Refresh Inventory'}
+            </button>
+          </div>
+        </div>
+        {refreshMsg && <div className="text-sm text-green-700 bg-green-100 border border-green-200 rounded-md p-2">{refreshMsg}</div>}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <select value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm"><option value="today">Today</option><option value="7days">Last 7 Days</option><option value="30days">Last 30 Days</option><option value="custom">Custom Date</option></select>
+          {filters.dateRange === 'custom' && <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)} className="p-2 border border-gray-300 rounded-md shadow-sm"/>}
+          <select value={filters.employee} onChange={e => setFilters({...filters, employee: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{uniqueEmployees.map(e => <option key={e} value={e}>{e}</option>)}</select>
+          <select value={filters.service} onChange={e => setFilters({...filters, service: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{serviceTypes.map(s => <option key={s} value={s}>{s}</option>)}</select>
+        </div>
+      </div>
   <div className="bg-white p-4 rounded-xl shadow-lg flex items-center justify-between"><h3 className="text-lg font-semibold text-gray-800">Filtered Jobs Report ({filteredJobs.length})</h3><div className="flex space-x-2"><button onClick={() => exportToPDF(filteredJobs)} disabled={!librariesLoaded || exporting.pdf} className="bg-red-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-red-700 disabled:bg-gray-400">{exporting.pdf ? 'Exporting…' : 'Export PDF'}</button><button onClick={() => exportToExcel(filteredJobs)} disabled={!librariesLoaded || exporting.excel} className="bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-green-700 disabled:bg-gray-400">{exporting.excel ? 'Exporting…' : 'Export Excel'}</button></div></div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-gray-800">Jobs by Employee</h3><JobsChart data={chartData} /></div><div className="lg:col-span-2 space-y-6"><div className="bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-yellow-700">In Progress ({jobsInProgress.length})</h3><JobsTable jobs={jobsInProgress} /></div><div className="bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-green-700">Completed ({jobsCompleted.length})</h3><JobsTable jobs={jobsCompleted} /></div></div></div>
     </div>

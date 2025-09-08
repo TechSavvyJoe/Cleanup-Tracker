@@ -1,8 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
+const axios = require('axios');
+const Vehicle = require('./models/Vehicle');
 
 const app = express();
 
@@ -19,6 +22,10 @@ async function connectDb() {
     await mongoose.connect(configDb, { useNewUrlParser: true, useUnifiedTopology: true, serverSelectionTimeoutMS: 3000 });
     console.log('MongoDB Connected');
   } catch (err) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('MongoDB connection failed in production. Set MONGO_URI env. Error:', err.message);
+      process.exit(1);
+    }
     console.warn('Local MongoDB not available, starting in-memory MongoDB. Error:', err.message);
     try {
       const { MongoMemoryServer } = require('mongodb-memory-server');
@@ -37,6 +44,11 @@ async function connectDb() {
 // Ensure DB is connected before starting the HTTP server
 async function main() {
   await connectDb();
+  try {
+    await fetchAndImportInventory();
+  } catch (e) {
+    console.warn('Inventory import skipped/failed:', e.message);
+  }
   startServer(startPort);
 }
 
@@ -115,3 +127,39 @@ fs.rename(csvFilePath, newCsvFilePath, (err) => {
   }
   console.log('CSV file moved to data folder');
 });
+
+// Import Google Sheets inventory CSV at startup
+async function fetchAndImportInventory() {
+  const SHEET_URL = process.env.INVENTORY_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv';
+  console.log('Fetching inventory CSV...');
+  const response = await axios.get(SHEET_URL, { responseType: 'stream' });
+  const headerMap = {
+    0: 'newUsed', 1: 'stockNumber', 2: 'vehicle', 3: 'year', 4: 'make', 5: 'model',
+    6: 'body', 7: 'drivetrain', 8: 'color', 9: 'odometer', 10: 'price', 11: 'age', 12: 'vin', 13: 'tags', 14: 'status'
+  };
+  const rows = [];
+  await new Promise((resolve, reject) => {
+    response.data
+      .pipe(csv({ mapHeaders: ({ header, index }) => headerMap[index] || null }))
+      .on('data', (row) => rows.push(row))
+      .on('error', reject)
+      .on('end', resolve);
+  });
+  if (!rows.length) { console.warn('Inventory CSV empty.'); return; }
+  const cleanInt = (v) => { const n = parseInt(String(v || '').replace(/[^0-9-]/g, ''), 10); return Number.isNaN(n) ? null : n; };
+  const cleanStr = (v) => (v == null ? '' : String(v).trim());
+  const cleanPrice = (v) => (v == null ? '' : String(v).replace(/[^0-9.]/g, '').trim());
+  const ops = rows.filter(r => cleanStr(r.vin)).map(r => {
+    const doc = {
+      newUsed: cleanStr(r.newUsed), stockNumber: cleanStr(r.stockNumber), vehicle: cleanStr(r.vehicle),
+      year: cleanInt(r.year), make: cleanStr(r.make), model: cleanStr(r.model), body: cleanStr(r.body),
+      drivetrain: cleanStr(r.drivetrain), color: cleanStr(r.color), odometer: cleanStr(r.odometer), price: cleanPrice(r.price),
+      age: cleanInt(r.age), vin: cleanStr(r.vin), tags: cleanStr(r.tags), status: cleanStr(r.status)
+    };
+    return { updateOne: { filter: { vin: doc.vin }, update: { $set: doc }, upsert: true } };
+  });
+  if (!ops.length) { console.warn('No VIN rows found in inventory CSV.'); return; }
+  const result = await Vehicle.bulkWrite(ops, { ordered: false });
+  const total = await Vehicle.countDocuments();
+  console.log(`Inventory import done. upserted=${result.upsertedCount || 0}, modified=${result.modifiedCount || 0}, total=${total}`);
+}
