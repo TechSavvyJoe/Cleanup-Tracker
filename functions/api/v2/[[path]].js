@@ -23,11 +23,9 @@ export async function onRequest(context) {
       ];
       let inserted = 0;
       for (const u of defaults) {
-        const res = await qRun(env.DB, `INSERT INTO users (id,name,pin,role,uid,username,password)
-          VALUES (?1,?2,?3,?4,?5,?6,?7)
-          ON CONFLICT(pin) DO NOTHING
-          ON CONFLICT(username) DO NOTHING`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
-        if (res.success) inserted += res.meta.changes || 0;
+        const res = await qRun(env.DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
+          VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
+        if (res.success) inserted += (res.meta?.changes || 0);
       }
       return json({ inserted });
     }
@@ -128,17 +126,18 @@ export async function onRequest(context) {
           model: findCol(header, ['model']),
           vehicle: findCol(header, ['vehicle','description']),
         };
+        if (idx.vin === -1) return bad('CSV missing VIN column', 400);
         let upserted = 0, modified = 0, total = 0;
         const tx = await env.DB.batch([]); // no-op to ensure DB is available
         for (const r of body) {
           total++;
           const vin = (r[idx.vin] || '').toString().trim().toUpperCase();
           if (!vin || vin.length < 6) continue;
-          const stock = (r[idx.stock] || '').toString().trim();
-          const year = parseInt(r[idx.year] || '', 10) || null;
-          const make = (r[idx.make] || '').toString().trim();
-          const model = (r[idx.model] || '').toString().trim();
-          const vehicleDescription = (r[idx.vehicle] || '').toString().trim() || toVehicleDescription({year,make,model});
+          const stock = idx.stock === -1 ? '' : (r[idx.stock] || '').toString().trim();
+          const year = idx.year === -1 ? null : (parseInt(r[idx.year] || '', 10) || null);
+          const make = idx.make === -1 ? '' : (r[idx.make] || '').toString().trim();
+          const model = idx.model === -1 ? '' : (r[idx.model] || '').toString().trim();
+          const vehicleDescription = (idx.vehicle === -1 ? '' : (r[idx.vehicle] || '').toString().trim()) || toVehicleDescription({year,make,model});
           const existing = await qGet(env.DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
           if (!existing) {
             await qRun(env.DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model) VALUES (?1,?2,?3,?4,?5,?6)', [vin, stock, vehicleDescription, year, make, model]);
