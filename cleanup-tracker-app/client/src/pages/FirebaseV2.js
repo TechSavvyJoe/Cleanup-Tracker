@@ -137,9 +137,34 @@ export default function FirebaseV2() {
           const diag = await V2.get('/diag');
           if (!diag.data?.dbBound) {
             setError('Failed to load jobs: database not bound. In Cloudflare Pages → Settings → Functions → D1 bindings, attach your D1 database with binding name "DB", then redeploy.');
-          } else {
-            setError(prev => prev || 'Failed to load jobs from server.');
+            return;
           }
+          // DB is bound—attempt to initialize schema and retry once
+          try {
+            await V2.post('/init');
+            const res2 = await V2.get('/jobs');
+            const list = (res2.data || []).map(j => ({
+              id: j._id,
+              technicianId: j.technicianId,
+              technicianName: j.technicianName,
+              assignedTechnicianIds: j.assignedTechnicianIds || [],
+              techTimers: j.techTimers || {},
+              vin: j.vin,
+              stockNumber: j.stockNumber,
+              vehicleDescription: j.vehicleDescription,
+              serviceType: j.serviceType,
+              startTime: j.startTime ? new Date(j.startTime) : null,
+              endTime: j.endTime ? new Date(j.endTime) : null,
+              duration: j.duration ?? null,
+              status: j.status,
+              date: j.date,
+            }));
+            setJobs(list);
+            return;
+          } catch {
+            // fall through to generic error
+          }
+          setError(prev => prev || 'Failed to load jobs from server.');
         } catch {
           setError(prev => prev || 'Failed to load jobs from server.');
         }
