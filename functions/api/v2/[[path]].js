@@ -108,7 +108,10 @@ export async function onRequest(context) {
       if (method === 'GET') {
         try {
           const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
-          return json(rows.map(toJobDto));
+          // Fetch assignments
+          const links = await qAll(DB, 'SELECT jobId, userId FROM job_technicians');
+          const byJob = links.reduce((m, r) => { (m[r.jobId] ||= []).push(r.userId); return m; }, {});
+          return json(rows.map(r => toJobDto(r, byJob[r.id] || [])));
         } catch (err) {
           // If the table isn't ready yet for some reason, ensure schema and return empty list instead of failing UI
           if ((err?.message || '').includes('no such table')) {
@@ -128,6 +131,12 @@ export async function onRequest(context) {
           idv, body.technicianId, body.technicianName, body.vin, body.stockNumber, body.vehicleDescription, body.serviceType, now.toISOString(), date,
           body.notes || null, body.location || null, body.price ?? null, now.toISOString()
         ]);
+        // record technician assignments (primary + optional co-techs)
+        const techs = [body.technicianId, ...(Array.isArray(body.coTechnicianIds) ? body.coTechnicianIds : [])]
+          .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+        for (const t of techs) {
+          await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [idv, t, now.toISOString()]);
+        }
         // job event
         await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
           [crypto.randomUUID(), idv, 'job_started', JSON.stringify(body || {}), now.toISOString(), body.technicianId || null]);
@@ -214,11 +223,12 @@ export async function onRequest(context) {
   }
 }
 
-function toJobDto(j) {
+function toJobDto(j, assignedIds = []) {
   return {
     _id: j.id,
     technicianId: j.technicianId,
     technicianName: j.technicianName,
+  assignedTechnicianIds: assignedIds,
     vin: j.vin,
     stockNumber: j.stockNumber,
     vehicleDescription: j.vehicleDescription,

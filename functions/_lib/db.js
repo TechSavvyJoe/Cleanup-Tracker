@@ -66,6 +66,13 @@ export async function ensureSchema(DB) {
   ]);
 
   // New tables for audit/logs
+  await DB.exec(`CREATE TABLE IF NOT EXISTS job_technicians (
+    jobId TEXT,
+    userId TEXT,
+    assignedAt TEXT,
+    PRIMARY KEY (jobId, userId)
+  );`);
+  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobtech_user ON job_technicians(userId);`);
   await DB.exec(`CREATE TABLE IF NOT EXISTS job_events (
     id TEXT PRIMARY KEY,
     jobId TEXT,
