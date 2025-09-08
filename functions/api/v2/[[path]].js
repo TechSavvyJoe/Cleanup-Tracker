@@ -34,6 +34,21 @@ export async function onRequest(context) {
   const method = request.method.toUpperCase();
 
   try {
+    // Diagnostics
+    if (segment === 'diag' && method === 'GET') {
+      if (!DB) return json({ dbBound: false });
+      let users = 0, jobs = 0, vehicles = 0;
+      try {
+        const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users'); users = uc?.c ?? 0;
+      } catch {}
+      try {
+        const jc = await qGet(DB, 'SELECT COUNT(1) c FROM jobs'); jobs = jc?.c ?? 0;
+      } catch {}
+      try {
+        const vc = await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'); vehicles = vc?.c ?? 0;
+      } catch {}
+      return json({ dbBound: true, users, jobs, vehicles });
+    }
     // Seed users
     if (segment === 'seed-users' && method === 'POST') {
       const defaults = [
