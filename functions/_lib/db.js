@@ -36,6 +36,57 @@ export async function ensureSchema(DB) {
   await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date);`);
   await DB.exec(`CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber);`);
 
+  // Add new columns if missing (idempotent)
+  await ensureColumns(DB, 'users', [
+    'phone TEXT',
+    'active INTEGER',
+    'createdAt TEXT',
+    'updatedAt TEXT'
+  ]);
+  await ensureColumns(DB, 'vehicles', [
+    'color TEXT',
+    'mileage INTEGER',
+    'bodyStyle TEXT',
+    'lastSeenAt TEXT',
+    'createdAt TEXT',
+    'updatedAt TEXT'
+  ]);
+  await ensureColumns(DB, 'jobs', [
+    'notes TEXT',
+    'photos TEXT',
+    'location TEXT',
+    'price REAL',
+    'qcPass INTEGER',
+    'qcBy TEXT',
+    'qcAt TEXT',
+    'canceledAt TEXT',
+    'canceledReason TEXT',
+    'createdAt TEXT',
+    'updatedAt TEXT'
+  ]);
+
+  // New tables for audit/logs
+  await DB.exec(`CREATE TABLE IF NOT EXISTS job_events (
+    id TEXT PRIMARY KEY,
+    jobId TEXT,
+    type TEXT,
+    payload TEXT,
+    at TEXT,
+    byUserId TEXT
+  );`);
+  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(jobId);`);
+
+  await DB.exec(`CREATE TABLE IF NOT EXISTS inventory_refresh_log (
+    id TEXT PRIMARY KEY,
+    srcUrl TEXT,
+    startedAt TEXT,
+    finishedAt TEXT,
+    rowsTotal INTEGER,
+    upserted INTEGER,
+    modified INTEGER,
+    error TEXT
+  );`);
+
   // Auto-seed default users on first run (idempotent)
   try {
     const { results } = await DB.prepare('SELECT COUNT(1) as c FROM users').all();
@@ -54,6 +105,21 @@ export async function ensureSchema(DB) {
     }
   } catch (e) {
     // ignore seed errors; normal API can still handle manual seeding
+  }
+}
+
+async function ensureColumns(DB, table, defs) {
+  try {
+    const { results } = await DB.prepare(`PRAGMA table_info(${table})`).all();
+    const existing = new Set((results || []).map(r => r.name));
+    for (const def of defs) {
+      const col = String(def).split(/\s+/)[0];
+      if (!existing.has(col)) {
+        await DB.exec(`ALTER TABLE ${table} ADD COLUMN ${def};`);
+      }
+    }
+  } catch (e) {
+    // ignore; tables might not exist yet (first run), handled above
   }
 }
 

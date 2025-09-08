@@ -123,10 +123,14 @@ export async function onRequest(context) {
         const now = new Date();
         const idv = crypto.randomUUID();
         const date = (body?.date) || now.toISOString().split('T')[0];
-  await qRun(DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date)
-          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,'In Progress',?9)`, [
+        await qRun(DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date,notes,location,price,createdAt,updatedAt)
+          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,'In Progress',?9,?10,?11,?12,?13,?13)`, [
           idv, body.technicianId, body.technicianName, body.vin, body.stockNumber, body.vehicleDescription, body.serviceType, now.toISOString(), date,
+          body.notes || null, body.location || null, body.price ?? null, now.toISOString()
         ]);
+        // job event
+        await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`,
+          [crypto.randomUUID(), idv, 'job_started', JSON.stringify(body || {}), now.toISOString(), body.technicianId || null]);
         return created({ _id: idv });
       }
       if (id && sub === 'complete' && method === 'PUT') {
@@ -134,7 +138,9 @@ export async function onRequest(context) {
         if (!job?.startTime) return bad('job not found', 404);
         const end = new Date();
         const duration = end - new Date(job.startTime);
-  await qRun(DB, 'UPDATE jobs SET endTime = ?1, duration = ?2, status = ?3 WHERE id = ?4', [end.toISOString(), duration, 'Completed', id]);
+        await qRun(DB, 'UPDATE jobs SET endTime = ?1, duration = ?2, status = ?3, updatedAt = ?4 WHERE id = ?5', [end.toISOString(), duration, 'Completed', end.toISOString(), id]);
+        await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at) VALUES (?1,?2,?3,?4,?5)`,
+          [crypto.randomUUID(), id, 'job_completed', JSON.stringify({ duration }), end.toISOString()]);
         return ok();
       }
     }
@@ -155,7 +161,8 @@ export async function onRequest(context) {
       if (path[1] === 'refresh' && method === 'POST') {
         const src = env.INVENTORY_CSV_URL;
         if (!src) return bad('INVENTORY_CSV_URL not set', 500);
-        const res = await fetch(src);
+  const startedAt = new Date();
+  const res = await fetch(src);
         if (!res.ok) return bad('Failed to fetch CSV', 502);
         const text = await res.text();
         const rows = parseCsv(text);
@@ -171,7 +178,7 @@ export async function onRequest(context) {
           vehicle: findCol(header, ['vehicle','description']),
         };
         if (idx.vin === -1) return bad('CSV missing VIN column', 400);
-        let upserted = 0, modified = 0, total = 0;
+  let upserted = 0, modified = 0, total = 0;
         const tx = await DB.batch([]); // no-op to ensure DB is available
         for (const r of body) {
           total++;
@@ -184,16 +191,19 @@ export async function onRequest(context) {
           const vehicleDescription = (idx.vehicle === -1 ? '' : (r[idx.vehicle] || '').toString().trim()) || toVehicleDescription({year,make,model});
           const existing = await qGet(DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
           if (!existing) {
-            await qRun(DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model) VALUES (?1,?2,?3,?4,?5,?6)', [vin, stock, vehicleDescription, year, make, model]);
+            await qRun(DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model,lastSeenAt,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)', [vin, stock, vehicleDescription, year, make, model, new Date().toISOString(), new Date().toISOString()]);
             upserted++;
           } else {
             const changed = (existing.stockNumber !== stock) || (existing.vehicleDescription !== vehicleDescription);
             if (changed) {
-              await qRun(DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5 WHERE vin = ?6', [stock, vehicleDescription, year, make, model, vin]);
+              await qRun(DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5, updatedAt = ?6, lastSeenAt = ?6 WHERE vin = ?7', [stock, vehicleDescription, year, make, model, new Date().toISOString(), vin]);
               modified++;
             }
           }
         }
+        const finishedAt = new Date();
+        await qRun(DB, `INSERT INTO inventory_refresh_log (id, srcUrl, startedAt, finishedAt, rowsTotal, upserted, modified, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`,
+          [crypto.randomUUID(), src, startedAt.toISOString(), finishedAt.toISOString(), total, upserted, modified, null]);
         return json({ upserted, modified, total });
       }
     }
