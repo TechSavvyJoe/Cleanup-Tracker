@@ -84,21 +84,6 @@ export async function onRequest(context) {
       };
       return json({ ok: true, initialized: true, ...stats });
     }
-    // Seed users
-    if (segment === 'seed-users' && method === 'POST') {
-      const defaults = [
-        { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
-        { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
-        { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
-      ];
-      let inserted = 0;
-      for (const u of defaults) {
-        const res = await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
-          VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
-        if (res.success) inserted += (res.meta?.changes || 0);
-      }
-      return json({ inserted });
-    }
 
     // Users
     if (segment === 'users') {
@@ -175,12 +160,21 @@ export async function onRequest(context) {
             return m; }, {});
           return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
         } catch (err) {
-          // If the table isn't ready yet for some reason, ensure schema and return empty list instead of failing UI
+          // If the table isn't ready yet for some reason, ensure schema and retry once.
           if ((err?.message || '').includes('no such table')) {
             await ensureSchema(DB);
-            return json([]);
+            const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
+            const links = await qAll(DB, 'SELECT jobId, userId, startedAt, endedAt, duration FROM job_technicians');
+            const byJob = links.reduce((m, r) => {
+              (m[r.jobId] ||= { ids: [], timers: {} });
+              m[r.jobId].ids.push(r.userId);
+              m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: r.duration ?? null };
+              return m; }, {});
+            return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
           }
-          throw err;
+          // For any other error, log it and return an empty array to prevent UI crash
+          console.error(`Error fetching jobs: ${err.message}`);
+          return json([]);
         }
       }
       if (method === 'POST') {

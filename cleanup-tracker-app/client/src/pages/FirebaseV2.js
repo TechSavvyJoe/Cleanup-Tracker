@@ -88,92 +88,54 @@ export default function FirebaseV2() {
       try {
         const res = await V2.get('/users');
         const data = res.data || [];
-        if (!Array.isArray(data) || data.length === 0) {
-          // If no users exist yet, seed defaults then reload
-          try {
-            await V2.post('/seed-users');
-            const res2 = await V2.get('/users');
-            setUsers(normalizeUsers(res2.data || []));
-          } catch (seedErr) {
-            setError(prev => prev || 'Failed to seed users on server.');
-          }
-        } else {
+        if (Array.isArray(data)) {
           setUsers(normalizeUsers(data));
         }
       } catch (e) {
-        // network/API failure: try init then retry users once
+        // If the primary fetch fails, assume the DB might not be initialized.
+        // Call the /init endpoint and then retry fetching users.
         try {
           await V2.post('/init');
-          const res = await V2.get('/users');
-          setUsers(normalizeUsers(res.data || []));
-        } catch {
-          // fallback: try seed-users then retry
-          try {
-            await V2.post('/seed-users');
-            const res2 = await V2.get('/users');
-            setUsers(normalizeUsers(res2.data || []));
-          } catch {
-            setError(prev => prev || 'Failed to load users from server.');
-          }
+          const res2 = await V2.get('/users');
+          setUsers(normalizeUsers(res2.data || []));
+        } catch (initErr) {
+          setError(prev => prev || 'Failed to load users from server.');
+          console.error("Failed to fetch users after init:", initErr);
         }
       }
     };
 
   const fetchJobs = async () => {
+      const processJobs = (data) => (data || []).map(j => ({
+        id: j._id,
+        technicianId: j.technicianId,
+        technicianName: j.technicianName,
+        assignedTechnicianIds: j.assignedTechnicianIds || [],
+        techTimers: j.techTimers || {},
+        vin: j.vin,
+        stockNumber: j.stockNumber,
+        vehicleDescription: j.vehicleDescription,
+        serviceType: j.serviceType,
+        startTime: j.startTime ? new Date(j.startTime) : null,
+        endTime: j.endTime ? new Date(j.endTime) : null,
+        duration: j.duration ?? null,
+        status: j.status,
+        date: j.date,
+      }));
+
       try {
         const res = await V2.get('/jobs');
-        const list = (res.data || []).map(j => ({
-          id: j._id,
-          technicianId: j.technicianId,
-          technicianName: j.technicianName,
-          assignedTechnicianIds: j.assignedTechnicianIds || [],
-          techTimers: j.techTimers || {},
-          vin: j.vin,
-          stockNumber: j.stockNumber,
-          vehicleDescription: j.vehicleDescription,
-          serviceType: j.serviceType,
-          startTime: j.startTime ? new Date(j.startTime) : null,
-          endTime: j.endTime ? new Date(j.endTime) : null,
-          duration: j.duration ?? null,
-          status: j.status,
-          date: j.date,
-        }));
-        setJobs(list);
+        setJobs(processJobs(res.data));
       } catch (e) {
+        // If the primary fetch fails, assume the DB might not be initialized.
+        // Call the /init endpoint and then retry fetching jobs.
         try {
-          const diag = await V2.get('/diag');
-          if (!diag.data?.dbBound) {
-            setError('Failed to load jobs: database not bound. In Cloudflare Pages → Settings → Functions → D1 bindings, attach your D1 database with binding name "DB", then redeploy.');
-            return;
-          }
-          // DB is bound—attempt to initialize schema and retry once
-          try {
-            await V2.post('/init');
-            const res2 = await V2.get('/jobs');
-            const list = (res2.data || []).map(j => ({
-              id: j._id,
-              technicianId: j.technicianId,
-              technicianName: j.technicianName,
-              assignedTechnicianIds: j.assignedTechnicianIds || [],
-              techTimers: j.techTimers || {},
-              vin: j.vin,
-              stockNumber: j.stockNumber,
-              vehicleDescription: j.vehicleDescription,
-              serviceType: j.serviceType,
-              startTime: j.startTime ? new Date(j.startTime) : null,
-              endTime: j.endTime ? new Date(j.endTime) : null,
-              duration: j.duration ?? null,
-              status: j.status,
-              date: j.date,
-            }));
-            setJobs(list);
-            return;
-          } catch {
-            // fall through to generic error
-          }
+          await V2.post('/init');
+          const res2 = await V2.get('/jobs');
+          setJobs(processJobs(res2.data));
+        } catch (initErr) {
           setError(prev => prev || 'Failed to load jobs from server.');
-        } catch {
-          setError(prev => prev || 'Failed to load jobs from server.');
+          console.error("Failed to fetch jobs after init:", initErr);
         }
       }
     };
