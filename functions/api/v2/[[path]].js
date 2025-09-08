@@ -83,8 +83,17 @@ export async function onRequest(context) {
     // Jobs
     if (segment === 'jobs') {
       if (method === 'GET') {
-  const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY datetime(startTime) DESC');
-        return json(rows.map(toJobDto));
+        try {
+          const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
+          return json(rows.map(toJobDto));
+        } catch (err) {
+          // If the table isn't ready yet for some reason, ensure schema and return empty list instead of failing UI
+          if ((err?.message || '').includes('no such table')) {
+            await ensureSchema(DB);
+            return json([]);
+          }
+          throw err;
+        }
       }
       if (method === 'POST') {
         const body = await request.json();
