@@ -1,12 +1,24 @@
 import { ensureSchema, qAll, qGet, qRun, json, bad, created, ok } from '../../_lib/db';
 import { parseCsv } from '../../_lib/csv';
 
+function autodetectD1(env) {
+  if (env.DB) return env.DB;
+  // Try to find a D1-like binding by duck-typing (prepare/batch/exec exist)
+  for (const [key, val] of Object.entries(env)) {
+    if (val && typeof val.prepare === 'function' && typeof val.batch === 'function') {
+      return val;
+    }
+  }
+  return null;
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
-  if (!env.DB) {
-    return bad('D1 binding missing. Create a D1 database and bind it as DB in Pages → Settings → Functions → D1 Bindings.');
+  const DB = autodetectD1(env);
+  if (!DB) {
+    return bad('D1 binding missing. In Cloudflare Pages → Settings → Functions → D1 bindings, bind your database with the binding name DB.', 500);
   }
-  await ensureSchema(env.DB);
+  await ensureSchema(DB);
 
   const url = new URL(request.url);
   const path = (params.path || '').split('/').filter(Boolean);
@@ -23,7 +35,7 @@ export async function onRequest(context) {
       ];
       let inserted = 0;
       for (const u of defaults) {
-        const res = await qRun(env.DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
+        const res = await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
           VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
         if (res.success) inserted += (res.meta?.changes || 0);
       }
@@ -33,7 +45,7 @@ export async function onRequest(context) {
     // Users
     if (segment === 'users') {
       if (method === 'GET') {
-        const rows = await qAll(env.DB, 'SELECT * FROM users ORDER BY name');
+  const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
         return json(rows.map(u => ({
           _id: u.id,
           name: u.name,
@@ -47,23 +59,23 @@ export async function onRequest(context) {
       if (method === 'POST') {
         const body = await request.json();
         if (!body?.name || !body?.pin) return bad('name and pin required', 400);
-        const existing = await qGet(env.DB, 'SELECT id FROM users WHERE pin = ?1', [body.pin]);
+  const existing = await qGet(DB, 'SELECT id FROM users WHERE pin = ?1', [body.pin]);
         if (existing) return bad('PIN already in use', 409);
         const idv = crypto.randomUUID();
         const uid = `det-${idv.slice(0,8)}`;
-        await qRun(env.DB, 'INSERT INTO users (id,name,pin,role,uid) VALUES (?1,?2,?3,?4,?5)', [idv, body.name, String(body.pin), 'detailer', uid]);
+  await qRun(DB, 'INSERT INTO users (id,name,pin,role,uid) VALUES (?1,?2,?3,?4,?5)', [idv, body.name, String(body.pin), 'detailer', uid]);
         return created({ _id: idv, name: body.name, pin: String(body.pin), role: 'detailer', uid });
       }
       if (id && method === 'PUT') {
         const body = await request.json();
         if (!body?.name || !body?.pin) return bad('name and pin required', 400);
-        const other = await qGet(env.DB, 'SELECT id FROM users WHERE pin = ?1 AND id <> ?2', [String(body.pin), id]);
+  const other = await qGet(DB, 'SELECT id FROM users WHERE pin = ?1 AND id <> ?2', [String(body.pin), id]);
         if (other) return bad('PIN already in use', 409);
-        await qRun(env.DB, 'UPDATE users SET name = ?1, pin = ?2 WHERE id = ?3', [body.name, String(body.pin), id]);
+  await qRun(DB, 'UPDATE users SET name = ?1, pin = ?2 WHERE id = ?3', [body.name, String(body.pin), id]);
         return ok();
       }
       if (id && method === 'DELETE') {
-        await qRun(env.DB, 'DELETE FROM users WHERE id = ?1', [id]);
+  await qRun(DB, 'DELETE FROM users WHERE id = ?1', [id]);
         return ok();
       }
     }
@@ -71,7 +83,7 @@ export async function onRequest(context) {
     // Jobs
     if (segment === 'jobs') {
       if (method === 'GET') {
-        const rows = await qAll(env.DB, 'SELECT * FROM jobs ORDER BY datetime(startTime) DESC');
+  const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY datetime(startTime) DESC');
         return json(rows.map(toJobDto));
       }
       if (method === 'POST') {
@@ -79,18 +91,18 @@ export async function onRequest(context) {
         const now = new Date();
         const idv = crypto.randomUUID();
         const date = (body?.date) || now.toISOString().split('T')[0];
-        await qRun(env.DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date)
+  await qRun(DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date)
           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,'In Progress',?9)`, [
           idv, body.technicianId, body.technicianName, body.vin, body.stockNumber, body.vehicleDescription, body.serviceType, now.toISOString(), date,
         ]);
         return created({ _id: idv });
       }
       if (id && sub === 'complete' && method === 'PUT') {
-        const job = await qGet(env.DB, 'SELECT startTime FROM jobs WHERE id = ?1', [id]);
+  const job = await qGet(DB, 'SELECT startTime FROM jobs WHERE id = ?1', [id]);
         if (!job?.startTime) return bad('job not found', 404);
         const end = new Date();
         const duration = end - new Date(job.startTime);
-        await qRun(env.DB, 'UPDATE jobs SET endTime = ?1, duration = ?2, status = ?3 WHERE id = ?4', [end.toISOString(), duration, 'Completed', id]);
+  await qRun(DB, 'UPDATE jobs SET endTime = ?1, duration = ?2, status = ?3 WHERE id = ?4', [end.toISOString(), duration, 'Completed', id]);
         return ok();
       }
     }
@@ -102,9 +114,9 @@ export async function onRequest(context) {
         if (!q) return json([]);
         let rows = [];
         if (q.length === 17) {
-          rows = await qAll(env.DB, 'SELECT * FROM vehicles WHERE UPPER(vin) = ?1 LIMIT 10', [q]);
+          rows = await qAll(DB, 'SELECT * FROM vehicles WHERE UPPER(vin) = ?1 LIMIT 10', [q]);
         } else {
-          rows = await qAll(env.DB, 'SELECT * FROM vehicles WHERE UPPER(vin) LIKE ?1 OR UPPER(stockNumber) LIKE ?1 LIMIT 20', [`%${q}%`]);
+          rows = await qAll(DB, 'SELECT * FROM vehicles WHERE UPPER(vin) LIKE ?1 OR UPPER(stockNumber) LIKE ?1 LIMIT 20', [`%${q}%`]);
         }
         return json(rows.map(v => ({ ...v, vehicleDescription: v.vehicleDescription || toVehicleDescription(v) })));
       }
@@ -128,7 +140,7 @@ export async function onRequest(context) {
         };
         if (idx.vin === -1) return bad('CSV missing VIN column', 400);
         let upserted = 0, modified = 0, total = 0;
-        const tx = await env.DB.batch([]); // no-op to ensure DB is available
+        const tx = await DB.batch([]); // no-op to ensure DB is available
         for (const r of body) {
           total++;
           const vin = (r[idx.vin] || '').toString().trim().toUpperCase();
@@ -138,14 +150,14 @@ export async function onRequest(context) {
           const make = idx.make === -1 ? '' : (r[idx.make] || '').toString().trim();
           const model = idx.model === -1 ? '' : (r[idx.model] || '').toString().trim();
           const vehicleDescription = (idx.vehicle === -1 ? '' : (r[idx.vehicle] || '').toString().trim()) || toVehicleDescription({year,make,model});
-          const existing = await qGet(env.DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
+          const existing = await qGet(DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
           if (!existing) {
-            await qRun(env.DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model) VALUES (?1,?2,?3,?4,?5,?6)', [vin, stock, vehicleDescription, year, make, model]);
+            await qRun(DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model) VALUES (?1,?2,?3,?4,?5,?6)', [vin, stock, vehicleDescription, year, make, model]);
             upserted++;
           } else {
             const changed = (existing.stockNumber !== stock) || (existing.vehicleDescription !== vehicleDescription);
             if (changed) {
-              await qRun(env.DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5 WHERE vin = ?6', [stock, vehicleDescription, year, make, model, vin]);
+              await qRun(DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5 WHERE vin = ?6', [stock, vehicleDescription, year, make, model, vin]);
               modified++;
             }
           }
