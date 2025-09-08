@@ -164,7 +164,7 @@ export default function FirebaseV2() {
       {!user ? (
         <LoginScreen onLogin={handleLogin} onPinLogin={handlePinLogin} error={error} setError={setError} users={users} />
       ) : (
-        <MainApp user={user} jobs={jobs} users={users} onLogout={handleLogout} librariesLoaded={librariesLoaded} />
+  <MainApp user={user} jobs={jobs} users={users} onLogout={handleLogout} librariesLoaded={librariesLoaded} />
       )}
     </div>
   );
@@ -244,7 +244,7 @@ function MainApp({ user, jobs, users, onLogout, librariesLoaded }) {
         {user.role === 'manager' && (
           <div className="max-w-7xl mx-auto">
             <div className="flex border-b border-gray-300 mb-6"><button onClick={() => setManagerView('dashboard')} className={`px-4 py-2 text-sm font-medium ${managerView === 'dashboard' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Dashboard</button><button onClick={() => setManagerView('team')} className={`px-4 py-2 text-sm font-medium ${managerView === 'team' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Team Management</button></div>
-            {managerView === 'dashboard' && <ManagerDashboard jobs={jobs} librariesLoaded={librariesLoaded} />}
+            {managerView === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} librariesLoaded={librariesLoaded} />}
             {managerView === 'team' && <TeamManagement users={users} />}
           </div>
         )}
@@ -252,7 +252,7 @@ function MainApp({ user, jobs, users, onLogout, librariesLoaded }) {
           <div className="max-w-4xl mx-auto">
             <div className="flex border-b border-gray-300 mb-6"><button onClick={() => setDetailerView('newJob')} className={`px-4 py-2 text-sm font-medium ${detailerView === 'newJob' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>New Job</button><button onClick={() => setDetailerView('dashboard')} className={`px-4 py-2 text-sm font-medium ${detailerView === 'dashboard' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>My Dashboard</button></div>
             {detailerView === 'dashboard' && <DetailerDashboard user={user} allJobs={jobs} />}
-            {detailerView === 'newJob' && <DetailerNewJobView user={user} jobs={jobs} isScannerLoaded={librariesLoaded} />}
+            {detailerView === 'newJob' && <DetailerNewJobView user={user} users={users} jobs={jobs} isScannerLoaded={librariesLoaded} />}
           </div>
         )}
       </main>
@@ -273,14 +273,16 @@ function Header({ userData, onLogout }) {
   );
 }
 
-function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
+function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [vehicle, setVehicle] = useState(null);
   const [error, setError] = useState('');
   const [loadingVehicle, setLoadingVehicle] = useState(false);
   const [jobType, setJobType] = useState('Detail');
   const [isScanning, setIsScanning] = useState(false);
-  const activeJob = useMemo(() => jobs.find(j => j.technicianId === user.uid && j.status === 'In Progress'), [jobs, user.uid]);
+  const activeJob = useMemo(() => jobs.find(j => (j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)) && j.status === 'In Progress'), [jobs, user.uid]);
+  const coTechOptions = useMemo(() => Object.values(users).filter(u => u.role === 'detailer' && u.uid !== user.uid), [users, user.uid]);
+  const [coTechId, setCoTechId] = useState('');
 
   const handleSearch = React.useCallback(async (term) => {
     if (!term) return;
@@ -324,6 +326,7 @@ function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
       vehicleDescription: vehicle.vehicleDescription || toVehicleDescription(vehicle),
       serviceType: jobType,
       date: new Date().toISOString().split('T')[0],
+  coTechnicianIds: coTechId ? [coTechId] : [],
     };
     try {
       await V2.post('/jobs', payload);
@@ -372,6 +375,13 @@ function DetailerNewJobView({ user, jobs, isScannerLoaded }) {
             <select value={jobType} onChange={e => setJobType(e.target.value)} className="block w-full p-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
               <option>Detail</option><option>Delivery</option><option>Rewash</option><option>Lot Car</option><option>FCTP</option><option>Cleanup</option>
             </select>
+            <div>
+              <label className="block text-sm text-blue-800 mb-1">Optional Co-Detailer</label>
+              <select value={coTechId} onChange={e => setCoTechId(e.target.value)} className="block w-full p-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                <option value="">None</option>
+                {coTechOptions.map(ct => <option key={ct.uid} value={ct.uid}>{ct.name}</option>)}
+              </select>
+            </div>
             <button onClick={handleStartJob} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Start Job</button>
           </div>
         )}
@@ -416,7 +426,7 @@ function KpiCard({ title, value, icon, colorClass }) {
 function DetailerDashboard({ user, allJobs }) {
   const [filters, setFilters] = useState({ dateRange: 'today' });
   const [customDate, setCustomDate] = useState('');
-  const myJobs = useMemo(() => allJobs.filter(j => j.technicianId === user.uid), [allJobs, user.uid]);
+  const myJobs = useMemo(() => allJobs.filter(j => j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)), [allJobs, user.uid]);
 
   const filteredJobs = useMemo(() => {
     const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -454,13 +464,23 @@ function DetailerDashboard({ user, allJobs }) {
   );
 }
 
-function ManagerDashboard({ jobs, librariesLoaded }) {
+function ManagerDashboard({ jobs, users, librariesLoaded }) {
   const [filters, setFilters] = useState({ employee: 'All', service: 'All', dateRange: 'today' });
   const [customDate, setCustomDate] = useState('');
   const [exporting, setExporting] = useState({ pdf: false, excel: false });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState('');
-  const uniqueEmployees = useMemo(() => ['All', ...new Set(jobs.map(j => j.technicianName).sort())], [jobs]);
+  const uniqueEmployees = useMemo(() => {
+    const names = new Set();
+    for (const j of jobs) {
+      names.add(j.technicianName);
+      (j.assignedTechnicianIds||[]).forEach(uid => {
+        const u = users[Object.keys(users).find(k => users[k].uid === uid)];
+        if (u?.name) names.add(u.name);
+      });
+    }
+    return ['All', ...Array.from(names).sort()];
+  }, [jobs, users]);
   const serviceTypes = ['All', 'Detail', 'Delivery', 'Rewash', 'Lot Car', 'FCTP', 'Cleanup'];
 
   const filteredJobs = useMemo(() => {
@@ -487,7 +507,18 @@ function ManagerDashboard({ jobs, librariesLoaded }) {
     return { jobsInProgress: jobs.filter(j => j.status === 'In Progress').length, totalJobs: filteredJobs.length, avgDuration: completed.length ? formatDuration(totalDuration / completed.length) : 'N/A', topEmployee: topEmployee ? `${topEmployee[0]} (${topEmployee[1]})` : 'N/A' };
   }, [jobs, filteredJobs]);
 
-  const chartData = useMemo(() => Object.entries(filteredJobs.reduce((acc, job) => ({...acc, [job.technicianName]: (acc[job.technicianName] || 0) + 1 }), {})).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count), [filteredJobs]);
+  const chartData = useMemo(() => {
+    const counts = {};
+    for (const job of filteredJobs) {
+      counts[job.technicianName] = (counts[job.technicianName] || 0) + 1;
+      for (const uid of (job.assignedTechnicianIds||[])) {
+        const u = Object.values(users).find(x => x.uid === uid);
+        const name = u?.name || uid;
+        counts[name] = (counts[name] || 0) + 1;
+      }
+    }
+    return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
+  }, [filteredJobs, users]);
   const jobsInProgress = useMemo(() => filteredJobs.filter(j => j.status === 'In Progress').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
   const jobsCompleted = useMemo(() => filteredJobs.filter(j => j.status === 'Completed').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
 
@@ -546,7 +577,7 @@ function ManagerDashboard({ jobs, librariesLoaded }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <KpiCard title="Jobs In Progress" value={kpiData.jobsInProgress} colorClass="bg-yellow-100 text-yellow-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>} />
-        <KpiCard title="Total Jobs (Filtered)" value={kpiData.totalJobs} colorClass="bg-blue-100 text-blue-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>} />
+  <KpiCard title="Total Jobs (Filtered)" value={kpiData.totalJobs} colorClass="bg-blue-100 text-blue-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>} />
         <KpiCard title="Avg. Duration" value={kpiData.avgDuration} colorClass="bg-green-100 text-green-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"></path>} />
         <KpiCard title="Top Employee" value={kpiData.topEmployee} colorClass="bg-indigo-100 text-indigo-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>} />
       </div>
