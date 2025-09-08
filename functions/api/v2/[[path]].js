@@ -1,31 +1,194 @@
-// Cloudflare Pages Function: proxy to backend API
-// Requires environment variable API_BASE (e.g., https://your-backend.onrender.com)
+import { ensureSchema, qAll, qGet, qRun, json, bad, created, ok } from '../../_lib/db';
+import { parseCsv } from '../../_lib/csv';
 
 export async function onRequest(context) {
   const { request, env, params } = context;
-  const apiBase = env.API_BASE;
-  if (!apiBase) {
-    return new Response(JSON.stringify({ error: 'API_BASE not configured' }), { status: 500, headers: { 'content-type': 'application/json' } });
+  if (!env.DB) {
+    return bad('D1 binding missing. Create a D1 database and bind it as DB in Pages → Settings → Functions → D1 Bindings.');
   }
+  await ensureSchema(env.DB);
+
   const url = new URL(request.url);
-  const tail = params.path ? `/${params.path}` : '';
-  const target = `${apiBase}/api/v2${tail}${url.search}`;
-  const init = {
-    method: request.method,
-    headers: new Headers(request.headers),
-    body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.blob(),
-  };
-  // Remove Cloudflare-specific and hop-by-hop headers
-  init.headers.delete('host');
-  init.headers.delete('cf-connecting-ip');
-  init.headers.delete('cf-ipcountry');
-  init.headers.delete('cf-ray');
-  init.headers.delete('cf-visitor');
-  init.headers.delete('x-forwarded-proto');
-  init.headers.delete('x-forwarded-for');
-  const resp = await fetch(target, init);
-  // Stream response through
-  const outHeaders = new Headers(resp.headers);
-  outHeaders.set('access-control-allow-origin', '*');
-  return new Response(resp.body, { status: resp.status, headers: outHeaders });
+  const path = (params.path || '').split('/').filter(Boolean);
+  const [segment, id, sub] = path; // e.g., jobs/:id/complete
+  const method = request.method.toUpperCase();
+
+  try {
+    // Seed users
+    if (segment === 'seed-users' && method === 'POST') {
+      const defaults = [
+        { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+        { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
+        { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+      ];
+      let inserted = 0;
+      for (const u of defaults) {
+        const res = await qRun(env.DB, `INSERT INTO users (id,name,pin,role,uid,username,password)
+          VALUES (?1,?2,?3,?4,?5,?6,?7)
+          ON CONFLICT(pin) DO NOTHING
+          ON CONFLICT(username) DO NOTHING`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
+        if (res.success) inserted += res.meta.changes || 0;
+      }
+      return json({ inserted });
+    }
+
+    // Users
+    if (segment === 'users') {
+      if (method === 'GET') {
+        const rows = await qAll(env.DB, 'SELECT * FROM users ORDER BY name');
+        return json(rows.map(u => ({
+          _id: u.id,
+          name: u.name,
+          pin: u.pin,
+          role: u.role,
+          uid: u.uid,
+          username: u.username,
+          password: u.password,
+        })));
+      }
+      if (method === 'POST') {
+        const body = await request.json();
+        if (!body?.name || !body?.pin) return bad('name and pin required', 400);
+        const existing = await qGet(env.DB, 'SELECT id FROM users WHERE pin = ?1', [body.pin]);
+        if (existing) return bad('PIN already in use', 409);
+        const idv = crypto.randomUUID();
+        const uid = `det-${idv.slice(0,8)}`;
+        await qRun(env.DB, 'INSERT INTO users (id,name,pin,role,uid) VALUES (?1,?2,?3,?4,?5)', [idv, body.name, String(body.pin), 'detailer', uid]);
+        return created({ _id: idv, name: body.name, pin: String(body.pin), role: 'detailer', uid });
+      }
+      if (id && method === 'PUT') {
+        const body = await request.json();
+        if (!body?.name || !body?.pin) return bad('name and pin required', 400);
+        const other = await qGet(env.DB, 'SELECT id FROM users WHERE pin = ?1 AND id <> ?2', [String(body.pin), id]);
+        if (other) return bad('PIN already in use', 409);
+        await qRun(env.DB, 'UPDATE users SET name = ?1, pin = ?2 WHERE id = ?3', [body.name, String(body.pin), id]);
+        return ok();
+      }
+      if (id && method === 'DELETE') {
+        await qRun(env.DB, 'DELETE FROM users WHERE id = ?1', [id]);
+        return ok();
+      }
+    }
+
+    // Jobs
+    if (segment === 'jobs') {
+      if (method === 'GET') {
+        const rows = await qAll(env.DB, 'SELECT * FROM jobs ORDER BY datetime(startTime) DESC');
+        return json(rows.map(toJobDto));
+      }
+      if (method === 'POST') {
+        const body = await request.json();
+        const now = new Date();
+        const idv = crypto.randomUUID();
+        const date = (body?.date) || now.toISOString().split('T')[0];
+        await qRun(env.DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date)
+          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,'In Progress',?9)`, [
+          idv, body.technicianId, body.technicianName, body.vin, body.stockNumber, body.vehicleDescription, body.serviceType, now.toISOString(), date,
+        ]);
+        return created({ _id: idv });
+      }
+      if (id && sub === 'complete' && method === 'PUT') {
+        const job = await qGet(env.DB, 'SELECT startTime FROM jobs WHERE id = ?1', [id]);
+        if (!job?.startTime) return bad('job not found', 404);
+        const end = new Date();
+        const duration = end - new Date(job.startTime);
+        await qRun(env.DB, 'UPDATE jobs SET endTime = ?1, duration = ?2, status = ?3 WHERE id = ?4', [end.toISOString(), duration, 'Completed', id]);
+        return ok();
+      }
+    }
+
+    // Vehicles
+    if (segment === 'vehicles') {
+      if (path[1] === 'search' && method === 'GET') {
+        const q = (new URL(request.url)).searchParams.get('q')?.toUpperCase()?.trim() || '';
+        if (!q) return json([]);
+        let rows = [];
+        if (q.length === 17) {
+          rows = await qAll(env.DB, 'SELECT * FROM vehicles WHERE UPPER(vin) = ?1 LIMIT 10', [q]);
+        } else {
+          rows = await qAll(env.DB, 'SELECT * FROM vehicles WHERE UPPER(vin) LIKE ?1 OR UPPER(stockNumber) LIKE ?1 LIMIT 20', [`%${q}%`]);
+        }
+        return json(rows.map(v => ({ ...v, vehicleDescription: v.vehicleDescription || toVehicleDescription(v) })));
+      }
+      if (path[1] === 'refresh' && method === 'POST') {
+        const src = env.INVENTORY_CSV_URL;
+        if (!src) return bad('INVENTORY_CSV_URL not set', 500);
+        const res = await fetch(src);
+        if (!res.ok) return bad('Failed to fetch CSV', 502);
+        const text = await res.text();
+        const rows = parseCsv(text);
+        // Heuristic column mapping
+        const header = rows[0] || [];
+        const body = rows.slice(1);
+        const idx = {
+          vin: findCol(header, ['vin','vehicle identification number','v.i.n']),
+          stock: findCol(header, ['stock','stock #','stock number','stock#']),
+          year: findCol(header, ['year']),
+          make: findCol(header, ['make']),
+          model: findCol(header, ['model']),
+          vehicle: findCol(header, ['vehicle','description']),
+        };
+        let upserted = 0, modified = 0, total = 0;
+        const tx = await env.DB.batch([]); // no-op to ensure DB is available
+        for (const r of body) {
+          total++;
+          const vin = (r[idx.vin] || '').toString().trim().toUpperCase();
+          if (!vin || vin.length < 6) continue;
+          const stock = (r[idx.stock] || '').toString().trim();
+          const year = parseInt(r[idx.year] || '', 10) || null;
+          const make = (r[idx.make] || '').toString().trim();
+          const model = (r[idx.model] || '').toString().trim();
+          const vehicleDescription = (r[idx.vehicle] || '').toString().trim() || toVehicleDescription({year,make,model});
+          const existing = await qGet(env.DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
+          if (!existing) {
+            await qRun(env.DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model) VALUES (?1,?2,?3,?4,?5,?6)', [vin, stock, vehicleDescription, year, make, model]);
+            upserted++;
+          } else {
+            const changed = (existing.stockNumber !== stock) || (existing.vehicleDescription !== vehicleDescription);
+            if (changed) {
+              await qRun(env.DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5 WHERE vin = ?6', [stock, vehicleDescription, year, make, model, vin]);
+              modified++;
+            }
+          }
+        }
+        return json({ upserted, modified, total });
+      }
+    }
+
+    return bad('Not found', 404);
+  } catch (e) {
+    return bad(`Error: ${e.message || e}`, 500);
+  }
 }
+
+function toJobDto(j) {
+  return {
+    _id: j.id,
+    technicianId: j.technicianId,
+    technicianName: j.technicianName,
+    vin: j.vin,
+    stockNumber: j.stockNumber,
+    vehicleDescription: j.vehicleDescription,
+    serviceType: j.serviceType,
+    startTime: j.startTime,
+    endTime: j.endTime,
+    duration: j.duration,
+    status: j.status,
+    date: j.date,
+  };
+}
+
+function toVehicleDescription(v) {
+  const parts = [v.year, v.make, v.model].filter(Boolean).join(' ').trim();
+  return parts || '';
+}
+
+function findCol(header, candidates) {
+  const h = header.map(x => String(x || '').trim().toLowerCase());
+  for (const c of candidates) {
+    const idx = h.indexOf(c);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+

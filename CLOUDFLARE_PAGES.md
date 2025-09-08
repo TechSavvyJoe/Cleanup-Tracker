@@ -1,44 +1,65 @@
-# Deploying to Cloudflare Pages (Free)
+# Deploying to Cloudflare Pages (All-in-Cloudflare)
 
-This repo is ready for Cloudflare Pages + Functions.
+This repo runs entirely on Cloudflare Pages + Functions + D1 (SQLite). No external backend needed.
 
 What you get:
 
-- Static frontend built from `cleanup-tracker-app/client`.
-- Cloudflare Functions proxy for `/api/v2/*` forwarding to your backend origin.
+- Static React frontend built from `cleanup-tracker-app/client`.
+- Serverless API at `/api/v2/*` implemented in Pages Functions.
+- D1 database for users, jobs, and vehicles.
 
 ## 1) Create a Cloudflare Pages project
 
 1. In Cloudflare Dashboard → Pages → Create project → Connect to Git → select this repo.
 2. Build config:
-   - Framework preset: None
-   - Build command: `npm --prefix cleanup-tracker-app/client ci || npm --prefix cleanup-tracker-app/client install && npm --prefix cleanup-tracker-app/client run build`
-   - Build output directory: `cleanup-tracker-app/client/build`
-   - Root directory: leave blank
+    - Framework preset: None
+    - Build command:
+       `npm --prefix cleanup-tracker-app/client ci || npm --prefix cleanup-tracker-app/client install && npm --prefix cleanup-tracker-app/client run build && touch cleanup-tracker-app/client/build/.nojekyll`
+    - Build output directory: `cleanup-tracker-app/client/build`
+    - Root directory: leave blank
 
-## 2) Add environment variables (Pages → Settings → Environment Variables)
+## 2) Create and bind a D1 database
 
-Required:
+1. Cloudflare Dashboard → D1 → Create database (e.g., `cleanup-tracker`).
+2. Pages → Your Project → Settings → Functions → D1 Bindings: Add a binding with Variable name `DB` and select the database.
+3. Redeploy if prompted. Tables are created on first API call automatically.
 
-- `API_BASE` → Your backend API base URL (e.g., `https://your-api.onrender.com`)
+## 3) Optional environment variables
 
-Optional (only if you host backend on Cloudflare Workers/another origin that needs CORS tweaks): none; proxy sets `access-control-allow-origin: *`.
+- `INVENTORY_CSV_URL` → Public CSV URL the app will import from when you click “Refresh Inventory”. Set this under Pages → Settings → Environment Variables.
 
-## 3) Functions routing
+No `API_BASE` is required—the frontend calls the built-in API.
 
-The `functions` folder enables Pages Functions:
+## 4) Functions overview
 
-- `functions/api/health.js` → `/api/health`
-- `functions/api/v2/[[path]].js` → `/api/v2/*` → proxies to `${API_BASE}/api/v2/*`
+- `functions/api/v2/[[path]].js` implements:
+   - `POST /api/v2/seed-users` — idempotently seeds a manager + sample detailers.
+   - `GET /api/v2/users` — list users.
+   - `POST /api/v2/users` — create detailer (unique 4-digit PIN).
+   - `PUT /api/v2/users/:id` — update user name/PIN.
+   - `DELETE /api/v2/users/:id` — delete user.
+   - `GET /api/v2/jobs` — list jobs.
+   - `POST /api/v2/jobs` — create job (starts in “In Progress”).
+   - `PUT /api/v2/jobs/:id/complete` — finish job, set duration.
+   - `GET /api/v2/vehicles/search?q=...` — search by full 17-char VIN or partial VIN/stock.
+   - `POST /api/v2/vehicles/refresh` — fetch CSV from `INVENTORY_CSV_URL` and upsert.
+- `functions/api/health.js` → `/api/health` returns `{ ok: true }`.
 
-## 4) Client configuration
+## 5) Client configuration
 
-When deployed on Pages with the Functions proxy, the React app can call `/api/v2/...` directly (no REACT_APP_API_URL needed).
+The React app calls relative `/api/v2` paths by default, so no extra config is needed for Pages.
 
-## 5) Backend hosting
+## 6) First run tips
 
-You can host your existing Node/Express API on Render/Railway/Fly.io. Set its base URL as `API_BASE` above.
+- After deploy, open your Pages URL. The app will attempt to load users.
+- If the list is empty, it will call `POST /api/v2/seed-users` automatically and reload.
+- Use Manager → Refresh Inventory to import vehicles from your CSV.
 
-## 6) Trigger first deploy
+## 7) Local development (optional)
 
-Push to `main` or use Cloudflare Pages to trigger a deploy. After deploy, visit your Pages URL; the app should load and API calls route via Functions.
+You can test with Wrangler:
+
+- Install Wrangler: `npm i -g wrangler`
+- Build client locally first, or point Pages dev to the client build folder:
+   `wrangler pages dev cleanup-tracker-app/client/build`
+- To use D1 locally, see Wrangler docs for binding a local D1 database and pass `--d1=DB@<binding>`.
