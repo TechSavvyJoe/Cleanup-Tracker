@@ -12,6 +12,16 @@ function autodetectD1(env) {
   return null;
 }
 
+function detectD1BindingName(env) {
+  if (env.DB) return 'DB';
+  for (const [key, val] of Object.entries(env)) {
+    if (val && typeof val.prepare === 'function' && typeof val.batch === 'function') {
+      return key;
+    }
+  }
+  return null;
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
   // Handle CORS preflight quickly
@@ -35,7 +45,7 @@ export async function onRequest(context) {
 
   try {
     // Diagnostics
-    if (segment === 'diag' && method === 'GET') {
+  if (segment === 'diag' && method === 'GET') {
       if (!DB) return json({ dbBound: false });
       let users = 0, jobs = 0, vehicles = 0;
       try {
@@ -47,7 +57,32 @@ export async function onRequest(context) {
       try {
         const vc = await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'); vehicles = vc?.c ?? 0;
       } catch {}
-      return json({ dbBound: true, users, jobs, vehicles });
+      const bindingName = detectD1BindingName(env);
+      return json({ dbBound: true, bindingName, users, jobs, vehicles });
+    }
+    // Init endpoint: ensure schema and seed default users
+    if (segment === 'init' && (method === 'GET' || method === 'POST')) {
+      if (!DB) return bad('D1 binding missing', 500);
+      await ensureSchema(DB);
+      // Idempotent seed: insert defaults if none
+      const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
+      if ((uc?.c ?? 0) === 0) {
+        const defaults = [
+          { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+          { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
+          { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+        ];
+        for (const u of defaults) {
+          await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
+            VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
+        }
+      }
+      const stats = {
+        users: (await qGet(DB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0,
+        jobs: (await qGet(DB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0,
+        vehicles: (await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'))?.c ?? 0,
+      };
+      return json({ ok: true, initialized: true, ...stats });
     }
     // Seed users
     if (segment === 'seed-users' && method === 'POST') {
