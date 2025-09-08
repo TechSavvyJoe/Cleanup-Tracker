@@ -103,7 +103,30 @@ export async function onRequest(context) {
     // Users
     if (segment === 'users') {
       if (method === 'GET') {
-  const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
+        let rows;
+        try {
+          rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
+        } catch (e) {
+          if ((e?.message || '').includes('no such table')) {
+            await ensureSchema(DB);
+            rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
+          } else {
+            throw e;
+          }
+        }
+        if (!rows || rows.length === 0) {
+          // Seed defaults automatically if empty (idempotent)
+          const defaults = [
+            { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+            { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
+            { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+          ];
+          for (const u of defaults) {
+            await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
+              VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
+          }
+          rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
+        }
         return json(rows.map(u => ({
           _id: u.id,
           name: u.name,

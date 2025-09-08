@@ -101,13 +101,20 @@ export default function FirebaseV2() {
           setUsers(normalizeUsers(data));
         }
       } catch (e) {
-        // network/API failure: try seeding once then reload
+        // network/API failure: try init then retry users once
         try {
-          await V2.post('/seed-users');
+          await V2.post('/init');
           const res = await V2.get('/users');
           setUsers(normalizeUsers(res.data || []));
         } catch {
-          setError(prev => prev || 'Failed to load users from server.');
+          // fallback: try seed-users then retry
+          try {
+            await V2.post('/seed-users');
+            const res2 = await V2.get('/users');
+            setUsers(normalizeUsers(res2.data || []));
+          } catch {
+            setError(prev => prev || 'Failed to load users from server.');
+          }
         }
       }
     };
