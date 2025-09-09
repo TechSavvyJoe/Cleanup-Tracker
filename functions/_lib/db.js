@@ -26,33 +26,30 @@ export async function ensureSchema(DB) {
   }
 }
 
-export function bad(error, status = 500) {
-  console.error(`Returning error: [${status}] ${error}`);
-  return new Response(JSON.stringify({ error }), {
-    status,
-  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
-  });
-}
+export const corsHeaders = {
+  'Content-Type': 'application/json',
+  'access-control-allow-origin': '*',
+  'vary': 'Origin'
+};
 
-export function created(data = { ok: true }) {
+export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
-    status: 201,
-  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
+    status,
+    headers: { ...corsHeaders, ...headers }
   });
 }
 
 export function ok(data = { ok: true }) {
-  return new Response(JSON.stringify(data), {
-    status: 200,
-  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
-  });
+  return json(data, 200);
 }
 
-export function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
-  });
+export function created(data = { ok: true }) {
+  return json(data, 201);
+}
+
+export function bad(error, status = 500) {
+  console.error(`Returning error: [${status}] ${error}`);
+  return json({ error }, status);
 }
 
 // Lightweight query helpers used by the API router

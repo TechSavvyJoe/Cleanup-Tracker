@@ -1,4 +1,4 @@
-import { ensureSchema, qAll, qGet, qRun, json, bad, created, ok } from '../../_lib/db';
+import { ensureSchema, qAll, qGet, qRun, json, bad, created, ok, corsHeaders } from '../../_lib/db';
 import { parseCsv } from '../../_lib/csv';
 
 function autodetectD1(env) {
@@ -48,13 +48,12 @@ export async function onRequest(context) {
   // CORS preflight
   if (request.method.toUpperCase() === 'OPTIONS') {
     const reqHeaders = request.headers.get('access-control-request-headers') || 'Content-Type';
-    return new Response(null, { status: 204, headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-      'access-control-allow-headers': reqHeaders,
-      'access-control-max-age': '86400',
-      'vary': 'Origin'
-    }});
+    const headers = { ...corsHeaders };
+    delete headers['Content-Type'];
+    headers['access-control-allow-methods'] = 'GET,POST,PUT,DELETE,OPTIONS';
+    headers['access-control-allow-headers'] = reqHeaders;
+    headers['access-control-max-age'] = '86400';
+    return new Response(null, { status: 204, headers });
   }
 
   const url = new URL(request.url);
