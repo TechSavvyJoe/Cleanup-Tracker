@@ -19,3 +19,5 @@ cleanup-tracker-app/client/.env
 # Cache
 *.eslintcache
 cleanup-tracker-app/client/node_modules/.cache/
+deploy/
+deploy-temp/
