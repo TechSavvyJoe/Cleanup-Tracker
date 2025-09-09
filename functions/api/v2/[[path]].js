@@ -56,8 +56,6 @@ export async function onRequest(context) {
       'vary': 'Origin'
     }});
   }
-  const DB = autodetectD1(env);
-  if (!DB) return bad('D1 binding missing. In Cloudflare Pages → Settings → Functions → D1 bindings, bind your database with the binding name DB.', 500);
 
   const url = new URL(request.url);
   const path = (params.path || '').split('/').filter(Boolean);
@@ -67,13 +65,20 @@ export async function onRequest(context) {
   try {
     // Diagnostics
     if (segment === 'diag' && method === 'GET') {
-      let users = 0, jobs = 0, vehicles = 0;
-      try { users = (await qGet(DB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0; } catch {}
-      try { jobs = (await qGet(DB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0; } catch {}
-      try { vehicles = (await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'))?.c ?? 0; } catch {}
+      const maybeDB = autodetectD1(env);
       const bindingName = detectD1BindingName(env);
+      if (!maybeDB) {
+        return json({ dbBound: false, bindingName: bindingName || null, users: 0, jobs: 0, vehicles: 0 });
+      }
+      let users = 0, jobs = 0, vehicles = 0;
+      try { users = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0; } catch {}
+      try { jobs = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0; } catch {}
+      try { vehicles = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM vehicles'))?.c ?? 0; } catch {}
       return json({ dbBound: true, bindingName, users, jobs, vehicles });
     }
+
+    const DB = autodetectD1(env);
+    if (!DB) return bad('D1 binding missing. In Cloudflare Pages → Settings → Functions → D1 bindings, bind your database with the binding name DB.', 500);
 
     // Init endpoint: ensure schema and seed default users
     if (segment === 'init' && (method === 'GET' || method === 'POST')) {
