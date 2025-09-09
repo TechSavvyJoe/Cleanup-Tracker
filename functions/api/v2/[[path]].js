@@ -47,10 +47,13 @@ export async function onRequest(context) {
   const { request, env, params } = context;
   // CORS preflight
   if (request.method.toUpperCase() === 'OPTIONS') {
+    const reqHeaders = request.headers.get('access-control-request-headers') || 'Content-Type';
     return new Response(null, { status: 204, headers: {
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-      'access-control-allow-headers': 'Content-Type'
+      'access-control-allow-headers': reqHeaders,
+      'access-control-max-age': '86400',
+      'vary': 'Origin'
     }});
   }
   const DB = autodetectD1(env);

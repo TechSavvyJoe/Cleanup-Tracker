@@ -30,28 +30,28 @@ export function bad(error, status = 500) {
   console.error(`Returning error: [${status}] ${error}`);
   return new Response(JSON.stringify({ error }), {
     status,
-    headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' }
+  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
   });
 }
 
 export function created(data = { ok: true }) {
   return new Response(JSON.stringify(data), {
     status: 201,
-    headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' }
+  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
   });
 }
 
 export function ok(data = { ok: true }) {
   return new Response(JSON.stringify(data), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' }
+  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
   });
 }
 
 export function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' }
+  headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*', 'vary': 'Origin' }
   });
 }
 
