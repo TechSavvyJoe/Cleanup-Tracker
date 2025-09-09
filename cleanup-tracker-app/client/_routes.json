@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "description": "Route API requests to Pages Functions (client root)",
+  "include": [
+    "/api",
+    "/api/*"
+  ]
+}
