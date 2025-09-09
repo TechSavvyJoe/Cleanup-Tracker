@@ -155,26 +155,19 @@ export async function qRun(DB, sql, params = []) {
   }
 }
 
+export function bad(error, status = 500) {
+  console.error(`Returning error: [${status}] ${error}`);
+  return new Response(JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' } });
+}
+
+export function created(data = { ok: true }) {
+  return new Response(JSON.stringify(data), { status: 201, headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' } });
+}
+
+export function ok(data = { ok: true }) {
+  return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' } });
+}
+
 export function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'content-type': 'application/json',
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-      'access-control-allow-headers': 'Content-Type'
-    },
-  });
-}
-
-export function bad(message, status = 400) {
-  return json({ error: message }, status);
-}
-
-export function ok() {
-  return json({ ok: true }, 200);
-}
-
-export function created(data) {
-  return json(data || { ok: true }, 201);
+  return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' } });
 }
