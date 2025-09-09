@@ -22,6 +22,28 @@ function detectD1BindingName(env) {
   return null;
 }
 
+async function seedDefaultUsers(DB) {
+  const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
+  if ((uc?.c ?? 0) > 0) {
+    return { seeded: false, count: uc.c };
+  }
+
+  const defaults = [
+    { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+    { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
+    { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+  ];
+
+  const statements = defaults.map(u => DB.prepare(
+    `INSERT INTO users (id,name,pin,role,uid,username,password) VALUES (?1,?2,?3,?4,?5,?6,?7)`
+  ).bind(u.id, u.name, u.pin, u.role, u.uid, u.username, u.password));
+
+  await DB.batch(statements);
+
+  const finalCount = await qGet(DB, 'SELECT COUNT(1) c FROM users');
+  return { seeded: true, count: finalCount?.c ?? defaults.length };
+}
+
 export async function onRequest(context) {
   const { request, env, params } = context;
   // Handle CORS preflight quickly
@@ -70,19 +92,8 @@ export async function onRequest(context) {
     if (segment === 'init' && (method === 'GET' || method === 'POST')) {
       if (!DB) return bad('D1 binding missing', 500);
       await ensureSchema(DB);
-      // Idempotent seed: insert defaults if none
-      const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-      if ((uc?.c ?? 0) === 0) {
-        const defaults = [
-          { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
-          { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
-          { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
-        ];
-        for (const u of defaults) {
-          await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
-            VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
-        }
-      }
+      await seedDefaultUsers(DB);
+      
       const stats = {
         users: (await qGet(DB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0,
         jobs: (await qGet(DB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0,
@@ -96,28 +107,19 @@ export async function onRequest(context) {
       if (method === 'GET') {
         let rows;
         try {
+          // Ensure users are seeded if table is empty
+          await seedDefaultUsers(DB);
           rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
         } catch (e) {
           if ((e?.message || '').includes('no such table')) {
             await ensureSchema(DB);
+            await seedDefaultUsers(DB);
             rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
           } else {
             throw e;
           }
         }
-        if (!rows || rows.length === 0) {
-          // Seed defaults automatically if empty (idempotent)
-          const defaults = [
-            { id: crypto.randomUUID(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
-            { id: crypto.randomUUID(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
-            { id: crypto.randomUUID(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
-          ];
-          for (const u of defaults) {
-            await qRun(DB, `INSERT OR IGNORE INTO users (id,name,pin,role,uid,username,password)
-              VALUES (?1,?2,?3,?4,?5,?6,?7)`, [u.id, u.name, u.pin, u.role, u.uid, u.username, u.password]);
-          }
-          rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
-        }
+        
         return json(rows.map(u => ({
           _id: u.id,
           name: u.name,
@@ -224,9 +226,9 @@ export async function onRequest(context) {
       const userId = body?.userId;
       if (!userId) return bad('userId required', 400);
       const now = new Date().toISOString();
-      // ensure assignment exists
+      // ensure assignment exists, then start timer
       await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [id, userId, now]);
-      // start timer only if not already started
+      
       const link = await qGet(DB, 'SELECT startedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
       if (!link?.startedAt) {
         await qRun(DB, 'UPDATE job_technicians SET startedAt = ?1 WHERE jobId = ?2 AND userId = ?3', [now, id, userId]);
@@ -239,8 +241,9 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}));
       const userId = body?.userId;
       if (!userId) return bad('userId required', 400);
-      const link = await qGet(DB, 'SELECT startedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      const link = await qGet(DB, 'SELECT startedAt, endedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
       if (!link?.startedAt) return bad('timer not started for this tech', 409);
+      if (link.endedAt) return ok(); // Already stopped, do nothing.
       const now = new Date();
       const duration = now - new Date(link.startedAt);
       await qRun(DB, 'UPDATE job_technicians SET endedAt = ?1, duration = ?2 WHERE jobId = ?3 AND userId = ?4', [now.toISOString(), duration, id, userId]);
@@ -298,32 +301,77 @@ export async function onRequest(context) {
           year: findCol(header, ['year']),
           make: findCol(header, ['make']),
           model: findCol(header, ['model']),
+          color: findCol(header, ['color', 'exterior color']),
+          mileage: findCol(header, ['mileage', 'odometer']),
+          bodyStyle: findCol(header, ['body', 'body style']),
           vehicle: findCol(header, ['vehicle','description']),
         };
         if (idx.vin === -1) return bad('CSV missing VIN column', 400);
   let upserted = 0, modified = 0, total = 0;
-        const tx = await DB.batch([]); // no-op to ensure DB is available
-        for (const r of body) {
-          total++;
+        
+        const allVinsInCsv = new Set();
+        const vehiclePayloads = body.map(r => {
           const vin = (r[idx.vin] || '').toString().trim().toUpperCase();
-          if (!vin || vin.length < 6) continue;
-          const stock = idx.stock === -1 ? '' : (r[idx.stock] || '').toString().trim();
-          const year = idx.year === -1 ? null : (parseInt(r[idx.year] || '', 10) || null);
-          const make = idx.make === -1 ? '' : (r[idx.make] || '').toString().trim();
-          const model = idx.model === -1 ? '' : (r[idx.model] || '').toString().trim();
-          const vehicleDescription = (idx.vehicle === -1 ? '' : (r[idx.vehicle] || '').toString().trim()) || toVehicleDescription({year,make,model});
-          const existing = await qGet(DB, 'SELECT vin, stockNumber, vehicleDescription FROM vehicles WHERE vin = ?1', [vin]);
-          if (!existing) {
-            await qRun(DB, 'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model,lastSeenAt,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)', [vin, stock, vehicleDescription, year, make, model, new Date().toISOString(), new Date().toISOString()]);
-            upserted++;
-          } else {
-            const changed = (existing.stockNumber !== stock) || (existing.vehicleDescription !== vehicleDescription);
-            if (changed) {
-              await qRun(DB, 'UPDATE vehicles SET stockNumber = ?1, vehicleDescription = ?2, year = ?3, make = ?4, model = ?5, updatedAt = ?6, lastSeenAt = ?6 WHERE vin = ?7', [stock, vehicleDescription, year, make, model, new Date().toISOString(), vin]);
-              modified++;
+          if (!vin || vin.length < 6) return null;
+          allVinsInCsv.add(vin);
+          return {
+            vin,
+            stock: idx.stock === -1 ? '' : (r[idx.stock] || '').toString().trim(),
+            year: idx.year === -1 ? null : (parseInt(r[idx.year] || '', 10) || null),
+            make: idx.make === -1 ? '' : (r[idx.make] || '').toString().trim(),
+            model: idx.model === -1 ? '' : (r[idx.model] || '').toString().trim(),
+            color: idx.color === -1 ? '' : (r[idx.color] || '').toString().trim(),
+            mileage: idx.mileage === -1 ? null : (parseInt(r[idx.mileage] || '', 10) || null),
+            bodyStyle: idx.bodyStyle === -1 ? '' : (r[idx.bodyStyle] || '').toString().trim(),
+            vehicleDescription: (idx.vehicle === -1 ? '' : (r[idx.vehicle] || '').toString().trim())
+          };
+        }).filter(Boolean);
+
+        // Batch fetch existing vehicles for comparison
+        const existingVehicles = new Map();
+        if (vehiclePayloads.length > 0) {
+          const vins = vehiclePayloads.map(v => v.vin);
+          // D1 has limits on `IN` clause, so chunk it.
+          const chunkSize = 100;
+          for (let i = 0; i < vins.length; i += chunkSize) {
+            const chunk = vins.slice(i, i + chunkSize);
+            const results = await qAll(DB, `SELECT vin, stockNumber, vehicleDescription, year, make, model, color, mileage, bodyStyle FROM vehicles WHERE vin IN (${'?,'.repeat(chunk.length).slice(0,-1)})`, chunk);
+            for (const v of results) {
+              existingVehicles.set(v.vin, v);
             }
           }
         }
+
+        const insertStmts = [];
+        const updateStmts = [];
+
+        for (const p of vehiclePayloads) {
+          total++;
+          p.vehicleDescription = p.vehicleDescription || toVehicleDescription(p);
+          const existing = existingVehicles.get(p.vin);
+          
+          if (!existing) {
+            insertStmts.push(DB.prepare(
+              'INSERT INTO vehicles (vin,stockNumber,vehicleDescription,year,make,model,color,mileage,bodyStyle,lastSeenAt,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?10)'
+            ).bind(p.vin, p.stock, p.vehicleDescription, p.year, p.make, p.model, p.color, p.mileage, p.bodyStyle, new Date().toISOString()));
+            upserted++;
+          } else {
+            const changed = (existing.stockNumber !== p.stock) || (existing.vehicleDescription !== p.vehicleDescription) || (existing.year !== p.year) || (existing.make !== p.make) || (existing.model !== p.model) || (existing.color !== p.color) || (existing.mileage !== p.mileage) || (existing.bodyStyle !== p.bodyStyle);
+            if (changed) {
+              updateStmts.push(DB.prepare(
+                'UPDATE vehicles SET stockNumber=?1, vehicleDescription=?2, year=?3, make=?4, model=?5, color=?6, mileage=?7, bodyStyle=?8, updatedAt=?9, lastSeenAt=?9 WHERE vin=?10'
+              ).bind(p.stock, p.vehicleDescription, p.year, p.make, p.model, p.color, p.mileage, p.bodyStyle, new Date().toISOString(), p.vin));
+              modified++;
+            } else {
+              // Even if nothing changed, update lastSeenAt
+              updateStmts.push(DB.prepare('UPDATE vehicles SET lastSeenAt=?1 WHERE vin=?2').bind(new Date().toISOString(), p.vin));
+            }
+          }
+        }
+
+        if (insertStmts.length > 0) await DB.batch(insertStmts);
+        if (updateStmts.length > 0) await DB.batch(updateStmts);
+
         const finishedAt = new Date();
         await qRun(DB, `INSERT INTO inventory_refresh_log (id, srcUrl, startedAt, finishedAt, rowsTotal, upserted, modified, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`,
           [crypto.randomUUID(), src, startedAt.toISOString(), finishedAt.toISOString(), total, upserted, modified, null]);
@@ -333,6 +381,7 @@ export async function onRequest(context) {
 
     return bad('Not found', 404);
   } catch (e) {
+    console.error(`Unhandled error on ${method} ${url.pathname}:`, e);
     return bad(`Error: ${e.message || e}`, 500);
   }
 }
@@ -353,6 +402,9 @@ function toJobDto(j, assignedIds = [], techTimers = {}) {
     duration: j.duration,
     status: j.status,
     date: j.date,
+    notes: j.notes,
+    location: j.location,
+    price: j.price,
   };
 }
 

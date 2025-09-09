@@ -32,8 +32,10 @@ export default function FirebaseV2() {
   const [jobs, setJobs] = useState([]);
   const [error, setError] = useState('');
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Restore persisted session
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     try {
       const saved = localStorage.getItem('v2User');
@@ -65,12 +67,13 @@ export default function FirebaseV2() {
   }, []);
 
   // Seed (idempotent) and load users; poll jobs and users periodically
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let jobsTimer; let usersTimer;
 
     const normalizeUsers = (arr) => {
       const map = {};
-      arr.forEach(u => {
+      (arr || []).forEach(u => {
         map[u._id] = {
           id: u._id,
           name: u.name,
@@ -87,7 +90,7 @@ export default function FirebaseV2() {
     const fetchUsers = async () => {
       try {
         const res = await V2.get('/users');
-        setUsers(normalizeUsers(res.data || []));
+        setUsers(normalizeUsers(res.data));
         // If we succeed, clear any previous loading errors
         if (error.includes('Failed to load users')) setError('');
       } catch (e) {
@@ -102,8 +105,8 @@ export default function FirebaseV2() {
           // DB is bound, so let's try to force initialization and retry.
           await V2.post('/init');
           const res2 = await V2.get('/users');
-          setUsers(normalizeUsers(res2.data || []));
-          if (error.includes('Failed to load users')) setError(''); // Clear error on success
+          setUsers(normalizeUsers(res2.data));
+          setError(prev => (prev && prev.includes('Failed to load users') ? '' : prev)); // Clear error on success
         } catch (retryErr) {
           const errorMsg = retryErr?.response?.data?.error || retryErr.message;
           setError(`Failed to load users from server. Reason: ${errorMsg}`);
@@ -128,11 +131,15 @@ export default function FirebaseV2() {
         duration: j.duration ?? null,
         status: j.status,
         date: j.date,
+        notes: j.notes,
+        location: j.location,
+        price: j.price,
       }));
 
       try {
         const res = await V2.get('/jobs');
         setJobs(processJobs(res.data));
+        setError(prev => (prev && prev.includes('Failed to load jobs') ? '' : prev));
       } catch (e) {
         // If the primary fetch fails, assume the DB might not be initialized.
         // Call the /init endpoint and then retry fetching jobs.
@@ -140,21 +147,29 @@ export default function FirebaseV2() {
           await V2.post('/init');
           const res2 = await V2.get('/jobs');
           setJobs(processJobs(res2.data));
+          setError(prev => (prev && prev.includes('Failed to load jobs') ? '' : prev));
         } catch (initErr) {
-          setError(prev => prev || 'Failed to load jobs from server.');
+          const errorMsg = initErr?.response?.data?.error || initErr.message;
+          setError(`Failed to load jobs from server. Reason: ${errorMsg}`);
           console.error("Failed to fetch jobs after init:", initErr);
         }
       }
     };
 
     // initial load
-    fetchUsers();
-    fetchJobs();
+    const initialLoad = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchUsers(), fetchJobs()]);
+      setIsLoading(false);
+    };
+    
+    initialLoad();
+
     // polling
-    jobsTimer = setInterval(fetchJobs, 3000);
-    usersTimer = setInterval(fetchUsers, 10000);
+    jobsTimer = setInterval(fetchJobs, 5000);
+    usersTimer = setInterval(fetchUsers, 15000);
     return () => { clearInterval(jobsTimer); clearInterval(usersTimer); };
-  }, [error]);
+  }, [error]); // effect intentionally runs only on mount
 
   const handleLogin = (loginId, password) => {
     const potentialUser = Object.values(users).find(u => u.username?.toLowerCase() === loginId.toLowerCase());
@@ -171,12 +186,22 @@ export default function FirebaseV2() {
 
   const handleLogout = () => { setUser(null); try { localStorage.removeItem('v2User'); } catch {} };
 
+  if (isLoading && !user) {
+    return (
+      <div className="min-h-screen bg-gray-800 flex flex-col justify-center items-center text-white">
+        <Spinner />
+        <p className="mt-4 text-lg">Loading application...</p>
+        {error && <p className="mt-2 text-red-400 text-sm max-w-md text-center">{error}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
       {!user ? (
         <LoginScreen onLogin={handleLogin} onPinLogin={handlePinLogin} error={error} setError={setError} users={users} />
       ) : (
-  <MainApp user={user} jobs={jobs} users={users} onLogout={handleLogout} librariesLoaded={librariesLoaded} />
+  <MainApp user={user} jobs={jobs} users={users} onLogout={handleLogout} librariesLoaded={librariesLoaded} error={error} />
       )}
     </div>
   );
@@ -198,580 +223,837 @@ function LoginScreen({ onLogin, onPinLogin, error, setError, users }) {
 
   useEffect(() => {
     if (pin.length === 4) {
-      setIsLoggingIn(true); setError('');
-      setTimeout(() => {
-        onPinLogin(pin);
-        setIsLoggingIn(false);
-        if (!Object.values(users).find(u => u.pin === pin)) {
-          setTimeout(() => setPin(''), 1000);
-        }
-      }, 500);
+      setIsLoggingIn(true);
+      setTimeout(() => { onPinLogin(pin); setIsLoggingIn(false); }, 300);
     }
-  }, [pin, onPinLogin, setError, users]);
+  }, [pin, onPinLogin]);
+
+  const detailers = useMemo(() => Object.values(users).filter(u => u.role === 'detailer'), [users]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-700">
-      <div className="p-8 bg-white/10 backdrop-blur-lg rounded-xl shadow-2xl w-full max-w-md border border-white/20">
-        <div className="flex flex-col items-center mb-6">
-          <div className="p-3 bg-blue-500 rounded-full mb-3 shadow-lg"><svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div>
-          <h1 className="text-3xl font-bold text-white mt-2">Mission Ford Detail</h1>
-          <p className="text-gray-300">Workflow & Analytics SAAS</p>
+    <div className="min-h-screen bg-gray-800 flex flex-col justify-center items-center p-4">
+      <h1 className="text-4xl font-bold text-white mb-8">Cleanup Tracker</h1>
+      
+      {error && <div className="bg-red-500 text-white p-3 rounded-md mb-6 max-w-md text-center shadow-lg">{error}</div>}
+
+      <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8">
+        <div className="flex justify-center mb-6 border-b">
+          <button onClick={() => setLoginMode('detailer')} className={`px-4 py-2 text-lg font-semibold ${loginMode === 'detailer' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
+            Technician
+          </button>
+          <button onClick={() => setLoginMode('manager')} className={`px-4 py-2 text-lg font-semibold ${loginMode === 'manager' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
+            Manager
+          </button>
         </div>
-        {error && <p className="text-red-300 text-center text-sm mb-4 bg-red-500/30 p-2 rounded-md border border-red-400/50">{error}</p>}
+
         {loginMode === 'detailer' ? (
-          <div className="text-white text-center">
-            <h2 className="text-xl mb-4">Enter Your 4-Digit PIN</h2>
-            <div className="flex justify-center items-center space-x-4 mb-6 h-12">
-              {Array(4).fill(0).map((_, i) => (<div key={i} className={`w-8 h-8 rounded-full transition-colors duration-300 ${pin.length > i ? 'bg-blue-400' : 'bg-white/20'}`}></div>))}
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-gray-700 mb-4">Enter PIN</h2>
+            <div className="flex justify-center items-center mb-4">
+              <div className="w-24 h-12 bg-gray-200 rounded-md flex items-center justify-center text-2xl tracking-widest">
+                {isLoggingIn ? <Spinner /> : pin.padEnd(4, '•')}
+              </div>
             </div>
-            {isLoggingIn && <div className="flex justify-center h-10"><Spinner /></div>}
             <div className="grid grid-cols-3 gap-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <button key={n} onClick={() => handlePinInput(n)} className="text-3xl p-4 bg-white/10 rounded-lg hover:bg-white/20 transition-colors">{n}</button>)}
-              <button onClick={handleBackspace} className="text-3xl p-4 bg-white/10 rounded-lg hover:bg-white/20 transition-colors">⌫</button>
-              <button onClick={() => handlePinInput(0)} className="text-3xl p-4 bg-white/10 rounded-lg hover:bg-white/20 transition-colors">0</button>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+                <button key={d} onClick={() => handlePinInput(d)} className="p-4 bg-gray-200 rounded-md text-xl font-bold hover:bg-gray-300 transition-colors">
+                  {d}
+                </button>
+              ))}
+              <button onClick={() => setPin('')} className="p-4 bg-red-200 rounded-md text-xl font-bold hover:bg-red-300 transition-colors">
+                Clear
+              </button>
+              <button onClick={() => handlePinInput(0)} className="p-4 bg-gray-200 rounded-md text-xl font-bold hover:bg-gray-300 transition-colors">
+                0
+              </button>
+              <button onClick={handleBackspace} className="p-4 bg-yellow-200 rounded-md text-xl font-bold hover:bg-yellow-300 transition-colors">
+                &larr;
+              </button>
             </div>
-            <button onClick={() => setLoginMode('manager')} className="text-blue-300 text-sm mt-6 hover:underline">Manager Login</button>
           </div>
         ) : (
-          <form onSubmit={handleManagerSubmit} className="space-y-4">
-            <h2 className="text-xl text-white text-center mb-4">Manager Login</h2>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} className="bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg w-full py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Username" required />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg w-full py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Password" required />
-            <button type="submit" disabled={isLoggingIn} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex justify-center items-center">{isLoggingIn ? <Spinner /> : 'Sign In'}</button>
-            <button onClick={() => setLoginMode('detailer')} className="text-blue-300 text-sm mt-2 hover:underline w-full text-center">Back to Detailer Login</button>
+          <form onSubmit={handleManagerSubmit}>
+            <h2 className="text-2xl font-bold text-gray-700 mb-4 text-center">Manager Login</h2>
+            <div className="mb-4">
+              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">Username</label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                required
+              />
+            </div>
+            <div className="mb-6">
+              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
+                required
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <button type="submit" disabled={isLoggingIn} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full flex justify-center items-center">
+                {isLoggingIn ? <Spinner /> : 'Sign In'}
+              </button>
+            </div>
           </form>
         )}
       </div>
-    </div>
-  );
-}
-
-function MainApp({ user, jobs, users, onLogout, librariesLoaded }) {
-  const [detailerView, setDetailerView] = useState('newJob');
-  const [managerView, setManagerView] = useState('dashboard');
-  return (
-    <>
-      <Header userData={user} onLogout={onLogout} />
-      <main className="p-4 sm:p-6 md:p-8">
-        {user.role === 'manager' && (
-          <div className="max-w-7xl mx-auto">
-            <div className="flex border-b border-gray-300 mb-6"><button onClick={() => setManagerView('dashboard')} className={`px-4 py-2 text-sm font-medium ${managerView === 'dashboard' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Dashboard</button><button onClick={() => setManagerView('team')} className={`px-4 py-2 text-sm font-medium ${managerView === 'team' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>Team Management</button></div>
-            {managerView === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} librariesLoaded={librariesLoaded} />}
-            {managerView === 'team' && <TeamManagement users={users} />}
-          </div>
-        )}
-        {user.role === 'detailer' && (
-          <div className="max-w-4xl mx-auto">
-            <div className="flex border-b border-gray-300 mb-6"><button onClick={() => setDetailerView('newJob')} className={`px-4 py-2 text-sm font-medium ${detailerView === 'newJob' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>New Job</button><button onClick={() => setDetailerView('dashboard')} className={`px-4 py-2 text-sm font-medium ${detailerView === 'dashboard' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>My Dashboard</button></div>
-            {detailerView === 'dashboard' && <DetailerDashboard user={user} allJobs={jobs} />}
-            {detailerView === 'newJob' && <DetailerNewJobView user={user} users={users} jobs={jobs} isScannerLoaded={librariesLoaded} />}
-          </div>
-        )}
-      </main>
-    </>
-  );
-}
-
-function Header({ userData, onLogout }) {
-  return (
-    <header className="bg-white shadow-sm sticky top-0 z-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          <div className="flex items-center space-x-3"><div className="p-2 bg-blue-600 rounded-lg"><svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div><h1 className="text-xl font-bold text-gray-800">Mission Ford Detail</h1></div>
-          <div className="flex items-center space-x-4"><div className="text-right"><span className="font-semibold text-gray-700">{userData.name}</span><span className="text-sm text-gray-500 block capitalize">{userData.role}</span></div><button onClick={onLogout} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded-lg transition duration-300"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg></button></div>
+      <div className="mt-8 text-center">
+        <h3 className="text-white text-lg mb-2">Available Technicians</h3>
+        <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+          {detailers.length > 0 ? detailers.map(d => (
+            <div key={d.id} className="bg-gray-700 text-white px-3 py-1 rounded-full text-sm">{d.name}</div>
+          )) : <p className="text-gray-400">Loading technicians...</p>}
         </div>
       </div>
-    </header>
-  );
-}
-
-function DetailerNewJobView({ user, users, jobs, isScannerLoaded }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [vehicle, setVehicle] = useState(null);
-  const [error, setError] = useState('');
-  const [loadingVehicle, setLoadingVehicle] = useState(false);
-  const [jobType, setJobType] = useState('Detail');
-  const [isScanning, setIsScanning] = useState(false);
-  const activeJob = useMemo(() => jobs.find(j => (j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)) && j.status === 'In Progress' && (j.techTimers?.[user.uid]?.endedAt ? false : true)), [jobs, user.uid]);
-  const coTechOptions = useMemo(() => Object.values(users).filter(u => u.role === 'detailer' && u.uid !== user.uid), [users, user.uid]);
-  const [coTechId, setCoTechId] = useState('');
-
-  const handleSearch = React.useCallback(async (term) => {
-    if (!term) return;
-    if (isScanning) setIsScanning(false);
-    setLoadingVehicle(true); setError(''); setVehicle(null);
-    try {
-      const res = await V2.get('/vehicles/search', { params: { q: term.trim() } });
-      const first = (res.data || [])[0];
-      if (first) setVehicle(first);
-      else setError('VIN/Stock # not found in the inventory list.');
-    } catch (e) {
-      setError('Search failed. Please try again.');
-    } finally {
-      setLoadingVehicle(false);
-    }
-  }, [isScanning]);
-
-  // Normalize VIN-like codes: strip spaces, make uppercase, and keep last 17 when QR contains prefixed text
-  const normalizeVinCandidate = (str) => {
-    if (!str) return '';
-    const s = String(str).trim().toUpperCase();
-    // If QR contains key:value pairs, try to find 17-char VIN substring
-    const vinMatch = s.match(/[A-HJ-NPR-Z0-9]{17}/); // VIN excludes I,O,Q
-    if (vinMatch) return vinMatch[0];
-    // Otherwise, return as-is for stock or short queries
-    return s;
-  };
-
-  const handleScan = (text) => {
-    const normalized = normalizeVinCandidate(text);
-    handleSearch(normalized);
-  };
-
-  const handleStartJob = async () => {
-    if (!vehicle) return;
-    const payload = {
-      technicianId: user.uid,
-      technicianName: user.name,
-      vin: vehicle.vin,
-      stockNumber: vehicle.stockNumber,
-      vehicleDescription: vehicle.vehicleDescription || toVehicleDescription(vehicle),
-      serviceType: jobType,
-      date: new Date().toISOString().split('T')[0],
-  coTechnicianIds: coTechId ? [coTechId] : [],
-    };
-    try {
-      await V2.post('/jobs', payload);
-      resetForm();
-    } catch (e) {
-      console.error(e);
-      setError('Failed to start job in database.');
-    }
-  };
-
-  const handleCompleteJob = async () => {
-    if (!activeJob || !activeJob.startTime) return;
-    try { await V2.put(`/jobs/${activeJob.id}/complete`); }
-    catch (e) { console.error(e); setError('Failed to complete job in database.'); }
-  };
-
-  const handleJoinExistingJob = async () => {
-    if (!vehicle) return;
-    try {
-      await V2.put('/vehicles/join-by-vin', { vin: vehicle.vin, userId: user.uid });
-      resetForm();
-    } catch (e) {
-      console.error(e);
-      setError(e?.response?.data?.error || 'Failed to join job for this VIN.');
-    }
-  };
-
-  const handleStopMyTimer = async (jobId) => {
-    try {
-      await V2.put(`/jobs/${jobId}/stop`, { userId: user.uid });
-    } catch (e) {
-      console.error(e);
-      setError(e?.response?.data?.error || 'Failed to stop timer.');
-    }
-  };
-
-  const resetForm = () => { setSearchTerm(''); setVehicle(null); setError(''); };
-  if (activeJob) return <ActiveJobCard activeJob={activeJob} onComplete={handleCompleteJob} onStopMyTimer={() => handleStopMyTimer(activeJob.id)} myTimerStart={activeJob.techTimers?.[user.uid]?.startedAt} />;
-  return (
-    <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg space-y-4">
-      <h2 className="text-2xl font-bold text-center text-gray-800">Start New Job</h2>
-      <>
-        {isScanning ? (
-          <div>
-            <VinScanner onScanSuccess={handleScan} />
-            <button onClick={() => setIsScanning(false)} className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg">Cancel Scan</button>
-          </div>
-        ) : (
-          <button onClick={() => setIsScanning(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center space-x-2">Scan VIN / QR / Barcode</button>
-        )}
-        <div className="relative"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300" /></div><div className="relative flex justify-center"><span className="px-2 bg-white text-sm text-gray-500">OR</span></div></div>
-        <form onSubmit={e => { e.preventDefault(); handleSearch(searchTerm); }} className="space-y-2">
-          <label htmlFor="search-term" className="text-sm font-medium text-gray-700">Enter VIN or Stock #</label>
-          <div className="flex rounded-md shadow-sm"><input id="search-term" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="e.g., WBABC4C5XKBU95732" className="flex-1 block w-full rounded-none rounded-l-md sm:text-sm border-gray-300 focus:ring-blue-500 focus:border-blue-500 p-2" /><button type="submit" className="inline-flex items-center px-4 py-2 rounded-r-md border border-l-0 border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100">Find</button></div>
-        </form>
-        {loadingVehicle && <div className="flex justify-center"><Spinner/></div>}
-        {error && <p className="text-red-500 text-center text-sm mt-2">{error}</p>}
-        {vehicle && (
-          <div className="border border-blue-200 bg-blue-50 p-4 rounded-lg space-y-4 animate-fade-in">
-            <h3 className="font-bold text-lg text-blue-800">Vehicle Found</h3>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <p><strong className="text-gray-600">VIN:</strong> {vehicle.vin}</p>
-              <p><strong className="text-gray-600">Stock #:</strong> {vehicle.stockNumber}</p>
-              <p className="col-span-2"><strong className="text-gray-600">Vehicle:</strong> {vehicle.vehicleDescription}</p>
-            </div>
-            <select value={jobType} onChange={e => setJobType(e.target.value)} className="block w-full p-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-              <option>Detail</option><option>Delivery</option><option>Rewash</option><option>Lot Car</option><option>FCTP</option><option>Cleanup</option>
-            </select>
-            <div>
-              <label className="block text-sm text-blue-800 mb-1">Optional Co-Detailer</label>
-              <select value={coTechId} onChange={e => setCoTechId(e.target.value)} className="block w-full p-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                <option value="">None</option>
-                {coTechOptions.map(ct => <option key={ct.uid} value={ct.uid}>{ct.name}</option>)}
-              </select>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button onClick={handleStartJob} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">Start New Job</button>
-              <button onClick={handleJoinExistingJob} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg">Join In-Progress</button>
-            </div>
-          </div>
-        )}
-      </>
     </div>
   );
 }
 
-function ActiveJobCard({ activeJob, onComplete, onStopMyTimer, myTimerStart }) {
-  const [elapsedTime, setElapsedTime] = useState('');
-  useEffect(() => {
-    const startRef = myTimerStart ? new Date(myTimerStart) : new Date(activeJob.startTime);
-    if (!startRef) return;
-    const timer = setInterval(() => setElapsedTime(formatDuration(new Date() - startRef)), 1000);
-    return () => clearInterval(timer);
-  }, [activeJob, myTimerStart]);
-  return (
-    <div className="max-w-lg mx-auto bg-yellow-50 border-2 border-yellow-400 p-6 rounded-xl shadow-lg text-center space-y-4">
-      <h2 className="text-2xl font-bold text-yellow-800">Job In Progress</h2>
-      <div className="text-yellow-900">
-        <p className="text-xl font-semibold">{activeJob.vehicleDescription}</p>
-        <p><strong>Stock #:</strong> {activeJob.stockNumber}</p>
-        <p><strong>Service:</strong> {activeJob.serviceType}</p>
-      </div>
-      <div className="bg-yellow-100 p-4 rounded-lg">
-        <p className="text-lg font-medium text-yellow-800">Elapsed Time</p>
-        <p className="text-4xl font-bold text-yellow-900 tracking-wider font-mono">{elapsedTime}</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <button onClick={onStopMyTimer} className="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 px-4 rounded-lg">Stop My Timer</button>
-        <button onClick={onComplete} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg">Complete Job</button>
-      </div>
-    </div>
-  );
-}
+function MainApp({ user, jobs, users, onLogout, librariesLoaded, error }) {
+  const [view, setView] = useState('dashboard'); // dashboard, jobs, users, reports
+  const [showScanner, setShowScanner] = useState(false);
+  const [selectedJob, setSelectedJob] = useState(null);
 
-function KpiCard({ title, value, icon, colorClass }) {
-  return (
-    <div className="bg-white p-5 rounded-xl shadow-lg flex items-center space-x-4">
-      <div className={`rounded-full p-3 ${colorClass}`}><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">{icon}</svg></div>
-      <div><p className="text-sm text-gray-500">{title}</p><p className="text-2xl font-bold text-gray-800">{value}</p></div>
-    </div>
-  );
-}
-
-function DetailerDashboard({ user, allJobs }) {
-  const [filters, setFilters] = useState({ dateRange: 'today' });
-  const [customDate, setCustomDate] = useState('');
-  const myJobs = useMemo(() => allJobs.filter(j => j.technicianId === user.uid || (j.assignedTechnicianIds||[]).includes(user.uid)), [allJobs, user.uid]);
-
-  const filteredJobs = useMemo(() => {
-    const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let startDate;
-    switch(filters.dateRange) {
-      case '7days': startDate = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000); break;
-      case '30days': startDate = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000); break;
-      case 'custom': startDate = customDate ? new Date(customDate + 'T00:00:00') : null; break;
-      case 'today': default: startDate = today; break;
+  const handleScanSuccess = async (vin) => {
+    setShowScanner(false);
+    if (user.role !== 'detailer') {
+      alert(`Scanned VIN: ${vin}. Only technicians can join jobs.`);
+      return;
     }
-    return myJobs.filter(job => !startDate || (filters.dateRange === 'custom' ? job.date === customDate : new Date(job.date + 'T00:00:00') >= startDate));
-  }, [myJobs, filters, customDate]);
-
-  const kpiData = useMemo(() => {
-    const completed = filteredJobs.filter(j => j.status === 'Completed');
-    const totalDuration = completed.reduce((acc, job) => acc + (job.duration || 0), 0);
-    return { totalJobs: filteredJobs.length, avgDuration: completed.length ? formatDuration(totalDuration / completed.length) : 'N/A' };
-  }, [filteredJobs]);
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="bg-white p-4 rounded-xl shadow-lg space-y-3">
-        <h3 className="font-semibold text-gray-700">My Performance</h3>
-        <div className="flex items-center space-x-2">
-          <select value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm text-sm"><option value="today">Today</option><option value="7days">Last 7 Days</option><option value="30days">Last 30 Days</option><option value="custom">Custom Date</option></select>
-          {filters.dateRange === 'custom' && <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)} className="p-2 border border-gray-300 rounded-md shadow-sm text-sm"/>}
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <KpiCard title="Total Jobs (Filtered)" value={kpiData.totalJobs} colorClass="bg-blue-100 text-blue-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>} />
-        <KpiCard title="My Avg. Duration" value={kpiData.avgDuration} colorClass="bg-green-100 text-green-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>} />
-      </div>
-      <div className="bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-gray-800">My Completed Jobs ({filteredJobs.filter(j => j.status === 'Completed').length})</h3><JobsTable jobs={filteredJobs.filter(j => j.status === 'Completed')} /></div>
-    </div>
-  );
-}
-
-function ManagerDashboard({ jobs, users, librariesLoaded }) {
-  const [filters, setFilters] = useState({ employee: 'All', service: 'All', dateRange: 'today' });
-  const [customDate, setCustomDate] = useState('');
-  const [exporting, setExporting] = useState({ pdf: false, excel: false });
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState('');
-  const uniqueEmployees = useMemo(() => {
-    const names = new Set();
-    for (const j of jobs) {
-      names.add(j.technicianName);
-      (j.assignedTechnicianIds||[]).forEach(uid => {
-        const u = users[Object.keys(users).find(k => users[k].uid === uid)];
-        if (u?.name) names.add(u.name);
-      });
+    try {
+      const res = await V2.put('/vehicles/join-by-vin', { vin, userId: user.id });
+      alert(`Successfully joined job for VIN ${vin}. Job ID: ${res.data.jobId}`);
+    } catch (err) {
+      const errorMsg = err?.response?.data?.error || err.message;
+      alert(`Failed to join job for VIN ${vin}. Reason: ${errorMsg}`);
     }
-    return ['All', ...Array.from(names).sort()];
-  }, [jobs, users]);
-  const serviceTypes = ['All', 'Detail', 'Delivery', 'Rewash', 'Lot Car', 'FCTP', 'Cleanup'];
+  };
 
-  const filteredJobs = useMemo(() => {
-    const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let startDate;
-    switch(filters.dateRange) {
-      case '7days': startDate = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000); break;
-      case '30days': startDate = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000); break;
-      case 'custom': startDate = customDate ? new Date(customDate + 'T00:00:00') : null; break;
-      case 'today': default: startDate = today; break;
-    }
-    return jobs.filter(job => {
-      const jobDate = new Date(job.date + 'T00:00:00');
-      const dateMatch = !startDate || (filters.dateRange === 'custom' ? job.date === customDate : jobDate >= startDate);
-      return (filters.employee === 'All' || job.technicianName === filters.employee) && (filters.service === 'All' || job.serviceType === filters.service) && dateMatch;
+  const detailers = useMemo(() => Object.values(users).filter(u => u.role === 'detailer'), [users]);
+  const managers = useMemo(() => Object.values(users).filter(u => u.role === 'manager'), [users]);
+  const activeJobs = useMemo(() => jobs.filter(j => j.status === 'In Progress'), [jobs]);
+  const completedJobs = useMemo(() => jobs.filter(j => j.status === 'Completed'), [jobs]);
+
+  const userActiveJob = useMemo(() => {
+    if (user.role !== 'detailer') return null;
+    return activeJobs.find(j => {
+      const timer = j.techTimers?.[user.id];
+      return timer && timer.startedAt && !timer.endedAt;
     });
-  }, [jobs, filters, customDate]);
+  }, [activeJobs, user]);
 
-  const kpiData = useMemo(() => {
-    const completed = filteredJobs.filter(j => j.status === 'Completed');
-    const totalDuration = completed.reduce((acc, job) => acc + (job.duration || 0), 0);
-    const employeeCounts = filteredJobs.reduce((acc, job) => ({ ...acc, [job.technicianName]: (acc[job.technicianName] || 0) + 1 }), {});
-    const topEmployee = Object.entries(employeeCounts).sort((a, b) => b[1] - a[1])[0];
-    return { jobsInProgress: jobs.filter(j => j.status === 'In Progress').length, totalJobs: filteredJobs.length, avgDuration: completed.length ? formatDuration(totalDuration / completed.length) : 'N/A', topEmployee: topEmployee ? `${topEmployee[0]} (${topEmployee[1]})` : 'N/A' };
-  }, [jobs, filteredJobs]);
-
-  const chartData = useMemo(() => {
-    const counts = {};
-    for (const job of filteredJobs) {
-      counts[job.technicianName] = (counts[job.technicianName] || 0) + 1;
-      for (const uid of (job.assignedTechnicianIds||[])) {
-        const u = Object.values(users).find(x => x.uid === uid);
-        const name = u?.name || uid;
-        counts[name] = (counts[name] || 0) + 1;
-      }
-    }
-    return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
-  }, [filteredJobs, users]);
-  const jobsInProgress = useMemo(() => filteredJobs.filter(j => j.status === 'In Progress').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
-  const jobsCompleted = useMemo(() => filteredJobs.filter(j => j.status === 'Completed').sort((a, b) => new Date(b.startTime) - new Date(a.startTime)), [filteredJobs]);
-
-  const refreshInventory = async () => {
-    setRefreshing(true);
-    setRefreshMsg('');
+  const handleStopWork = async () => {
+    if (!userActiveJob) return;
     try {
-      const res = await V2.post('/vehicles/refresh');
-      const { upserted = 0, modified = 0, total = 0 } = res.data || {};
-      setRefreshMsg(`Inventory refreshed. Upserted: ${upserted}, Modified: ${modified}, Total: ${total}.`);
-    } catch (e) {
-      setRefreshMsg('Inventory refresh failed.');
-    } finally {
-      setRefreshing(false);
-      // Auto-hide message after a short delay
-      setTimeout(() => setRefreshMsg(''), 4000);
+      await V2.put(`/jobs/${userActiveJob.id}/stop`, { userId: user.id });
+      alert('You have stopped work on the current job.');
+    } catch (err) {
+      alert('Failed to stop work. Please try again.');
     }
-  };
-
-  const exportToPDF = (data) => {
-    if (!librariesLoaded || !window.jspdf || !window.jspdf.jsPDF) return;
-    setExporting(prev => ({ ...prev, pdf: true }));
-    setTimeout(() => {
-      try {
-        const { jsPDF } = window.jspdf; const doc = new jsPDF();
-        doc.text('Detailing Job Report', 14, 16);
-        const rows = data.map(job => [job.technicianName, job.vehicleDescription, job.stockNumber, job.serviceType, new Date(job.date).toLocaleDateString(), formatTime(job.startTime), formatTime(job.endTime), formatDuration(job.duration)]);
-        // eslint-disable-next-line no-undef
-        doc.autoTable({ startY: 22, head: [['Employee', 'Vehicle', 'Stock #', 'Service', 'Date', 'Start', 'End', 'Duration']], body: rows });
-        doc.save(`detailing_report_${new Date().toISOString().split('T')[0]}.pdf`);
-      } catch (e) {
-        console.error('PDF export failed:', e);
-      } finally {
-        setExporting(prev => ({ ...prev, pdf: false }));
-      }
-    }, 0);
-  };
-  const exportToExcel = (data) => {
-    if (!librariesLoaded || !window.XLSX) return;
-    setExporting(prev => ({ ...prev, excel: true }));
-    setTimeout(() => {
-      try {
-        const worksheetData = data.map(job => ({ Employee: job.technicianName, Vehicle: job.vehicleDescription, 'Stock #': job.stockNumber, VIN: job.vin, Service: job.serviceType, Date: new Date(job.date).toLocaleDateString(), 'Start Time': formatTime(job.startTime), 'End Time': formatTime(job.endTime), 'Duration (ms)': job.duration, 'Duration (Formatted)': formatDuration(job.duration) }));
-        const worksheet = window.XLSX.utils.json_to_sheet(worksheetData); const workbook = window.XLSX.utils.book_new();
-        window.XLSX.utils.book_append_sheet(workbook, worksheet, 'Jobs');
-        window.XLSX.writeFile(workbook, `detailing_report_${new Date().toISOString().split('T')[0]}.xlsx`);
-      } catch (e) {
-        console.error('Excel export failed:', e);
-      } finally {
-        setExporting(prev => ({ ...prev, excel: false }));
-      }
-    }, 0);
   };
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <KpiCard title="Jobs In Progress" value={kpiData.jobsInProgress} colorClass="bg-yellow-100 text-yellow-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>} />
-  <KpiCard title="Total Jobs (Filtered)" value={kpiData.totalJobs} colorClass="bg-blue-100 text-blue-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>} />
-        <KpiCard title="Avg. Duration" value={kpiData.avgDuration} colorClass="bg-green-100 text-green-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"></path>} />
-        <KpiCard title="Top Employee" value={kpiData.topEmployee} colorClass="bg-indigo-100 text-indigo-600" icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>} />
+    <div className="flex h-screen bg-gray-200">
+      {/* Sidebar */}
+      <div className="w-64 bg-gray-800 text-white flex flex-col">
+        <div className="px-8 py-6 border-b border-gray-700">
+          <h2 className="text-2xl font-semibold">Cleanup Tracker</h2>
+          <p className="text-gray-400">Welcome, {user.name}</p>
+        </div>
+        <nav className="flex-1 px-6 py-4">
+          <a href="#/" onClick={() => setView('dashboard')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'dashboard' ? 'bg-gray-700' : ''}`}>Dashboard</a>
+          <a href="#/" onClick={() => setView('jobs')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'jobs' ? 'bg-gray-700' : ''}`}>Jobs</a>
+          {user.role === 'manager' && (
+            <>
+              <a href="#/" onClick={() => setView('users')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'users' ? 'bg-gray-700' : ''}`}>Users</a>
+              <a href="#/" onClick={() => setView('reports')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'reports' ? 'bg-gray-700' : ''}`}>Reports</a>
+            </>
+          )}
+        </nav>
+        <div className="px-6 py-4">
+          <button onClick={onLogout} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded">
+            Logout
+          </button>
+        </div>
       </div>
-      <div className="bg-white p-4 rounded-xl shadow-lg space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-gray-700">Filter Options</h3>
-          <div className="flex items-center space-x-2">
-            <button onClick={refreshInventory} disabled={refreshing} className="bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400">
-              {refreshing ? 'Refreshing…' : 'Refresh Inventory'}
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="bg-white shadow-md p-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-800 capitalize">{view}</h1>
+          {error && <div className="text-red-500 text-sm font-semibold">{error}</div>}
+          <div>
+            {user.role === 'detailer' && userActiveJob && (
+              <button onClick={handleStopWork} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded mr-4 flex items-center">
+                <span className="mr-2">Stop My Work</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+              </button>
+            )}
+            {user.role === 'detailer' && (
+              <button onClick={() => setShowScanner(true)} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                Scan VIN to Join Job
+              </button>
+            )}
+            {user.role === 'manager' && (
+              <button onClick={() => setView('new-job')} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+                Create New Job
+              </button>
+            )}
+          </div>
+        </header>
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-200 p-6">
+          {view === 'dashboard' && <Dashboard user={user} jobs={jobs} users={users} activeJobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} />}
+          {view === 'jobs' && <JobsList jobs={jobs} users={users} onJobSelect={setSelectedJob} />}
+          {view === 'users' && user.role === 'manager' && <UsersList users={detailers} managers={managers} />}
+          {view === 'reports' && user.role === 'manager' && <Reports jobs={jobs} users={users} librariesLoaded={librariesLoaded} />}
+          {view === 'new-job' && user.role === 'manager' && <NewJobForm technicians={detailers} onJobCreated={() => setView('jobs')} />}
+        </main>
+      </div>
+
+      {showScanner && <VinScanner onScanSuccess={handleScanSuccess} onCancel={() => setShowScanner(false)} />}
+      {selectedJob && <JobDetailsModal job={selectedJob} users={users} onClose={() => setSelectedJob(null)} />}
+    </div>
+  );
+}
+
+function Dashboard({ user, jobs, users, activeJobs, completedJobs, userActiveJob }) {
+  const myCompletedToday = useMemo(() => {
+    if (user.role !== 'detailer') return [];
+    const today = new Date().toISOString().slice(0, 10);
+    return completedJobs.filter(j => j.date === today && j.assignedTechnicianIds.includes(user.id));
+  }, [completedJobs, user]);
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-gray-500 text-sm font-medium">Total Jobs Today</h3>
+          <p className="text-3xl font-bold text-gray-800">{jobs.filter(j => j.date === new Date().toISOString().slice(0, 10)).length}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-gray-500 text-sm font-medium">Active Jobs</h3>
+          <p className="text-3xl font-bold text-gray-800">{activeJobs.length}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-gray-500 text-sm font-medium">Completed Today</h3>
+          <p className="text-3xl font-bold text-gray-800">{completedJobs.filter(j => j.date === new Date().toISOString().slice(0, 10)).length}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h3 className="text-gray-500 text-sm font-medium">Active Technicians</h3>
+          <p className="text-3xl font-bold text-gray-800">{Object.keys(users).filter(id => users[id].role === 'detailer').length}</p>
+        </div>
+      </div>
+
+      {user.role === 'detailer' && (
+        <div className="mb-6">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">My Status</h2>
+          {userActiveJob ? (
+            <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4" role="alert">
+              <p className="font-bold">You are currently working on a job:</p>
+              <p>{userActiveJob.vehicleDescription} ({userActiveJob.vin})</p>
+              <p>Started at: {formatTime(userActiveJob.startTime)}</p>
+            </div>
+          ) : (
+            <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4" role="alert">
+              <p className="font-bold">You are not currently on a job.</p>
+              <p>Scan a VIN to start a new job.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Active Jobs</h2>
+          <div className="overflow-y-auto max-h-96">
+            {activeJobs.length > 0 ? (
+              activeJobs.map(job => <JobCard key={job.id} job={job} users={users} />)
+            ) : (
+              <p className="text-gray-500">No active jobs.</p>
+            )}
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">My Completed Jobs Today</h2>
+          <div className="overflow-y-auto max-h-96">
+            {myCompletedToday.length > 0 ? (
+              myCompletedToday.map(job => <JobCard key={job.id} job={job} users={users} />)
+            ) : (
+              <p className="text-gray-500">You haven't completed any jobs today.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobCard({ job, users }) {
+  const assignedTechs = job.assignedTechnicianIds.map(id => users[id]?.name || 'Unknown').join(', ');
+  return (
+    <div className="border-b py-3">
+      <p className="font-semibold text-gray-800">{job.vehicleDescription}</p>
+      <p className="text-sm text-gray-600">VIN: {job.vin} | Stock: {job.stockNumber}</p>
+      <p className="text-sm text-gray-600">Service: {job.serviceType}</p>
+      <p className="text-sm text-gray-600">Assigned: {assignedTechs}</p>
+      <p className="text-sm text-gray-500">Started: {formatTime(job.startTime)}</p>
+    </div>
+  );
+}
+
+function JobsList({ jobs, users, onJobSelect }) {
+  const [filter, setFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredJobs = useMemo(() => {
+    return jobs
+      .filter(job => {
+        if (filter === 'all') return true;
+        return job.status.toLowerCase().replace(' ', '-') === filter;
+      })
+      .filter(job => {
+        if (!searchTerm) return true;
+        const term = searchTerm.toLowerCase();
+        return (
+          job.vin?.toLowerCase().includes(term) ||
+          job.stockNumber?.toLowerCase().includes(term) ||
+          job.vehicleDescription?.toLowerCase().includes(term) ||
+          job.serviceType?.toLowerCase().includes(term) ||
+          (job.assignedTechnicianIds.map(id => users[id]?.name).join(' ').toLowerCase().includes(term))
+        );
+      });
+  }, [jobs, users, filter, searchTerm]);
+
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-md">
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex space-x-2">
+          <button onClick={() => setFilter('all')} className={`px-3 py-1 rounded-full text-sm ${filter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-300'}`}>All</button>
+          <button onClick={() => setFilter('in-progress')} className={`px-3 py-1 rounded-full text-sm ${filter === 'in-progress' ? 'bg-yellow-500 text-white' : 'bg-gray-300'}`}>In Progress</button>
+          <button onClick={() => setFilter('completed')} className={`px-3 py-1 rounded-full text-sm ${filter === 'completed' ? 'bg-green-500 text-white' : 'bg-gray-300'}`}>Completed</button>
+        </div>
+        <input
+          type="text"
+          placeholder="Search jobs..."
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          className="border rounded px-3 py-1"
+        />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="p-3">Vehicle</th>
+              <th className="p-3">VIN/Stock</th>
+              <th className="p-3">Service</th>
+              <th className="p-3">Technicians</th>
+              <th className="p-3">Start Time</th>
+              <th className="p-3">End Time</th>
+              <th className="p-3">Duration</th>
+              <th className="p-3">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredJobs.map(job => (
+              <tr key={job.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => onJobSelect(job)}>
+                <td className="p-3">{job.vehicleDescription}</td>
+                <td className="p-3">{job.vin}<br/>{job.stockNumber}</td>
+                <td className="p-3">{job.serviceType}</td>
+                <td className="p-3">{job.assignedTechnicianIds.map(id => users[id]?.name || 'N/A').join(', ')}</td>
+                <td className="p-3">{formatTime(job.startTime)}</td>
+                <td className="p-3">{formatTime(job.endTime)}</td>
+                <td className="p-3">{formatDuration(job.duration)}</td>
+                <td className="p-3">
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                    job.status === 'Completed' ? 'bg-green-200 text-green-800' :
+                    job.status === 'In Progress' ? 'bg-yellow-200 text-yellow-800' : 'bg-gray-200 text-gray-800'
+                  }`}>
+                    {job.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function JobDetailsModal({ job, users, onClose }) {
+  if (!job) return null;
+
+  const assignedTechs = job.assignedTechnicianIds.map(id => users[id]).filter(Boolean);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <h2 className="text-2xl font-bold text-gray-800">Job Details</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800">&times;</button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div><strong className="text-gray-600">Vehicle:</strong> {job.vehicleDescription}</div>
+          <div><strong className="text-gray-600">VIN:</strong> {job.vin}</div>
+          <div><strong className="text-gray-600">Stock #:</strong> {job.stockNumber}</div>
+          <div><strong className="text-gray-600">Service:</strong> {job.serviceType}</div>
+          <div><strong className="text-gray-600">Date:</strong> {new Date(job.date).toLocaleDateString()}</div>
+          <div><strong className="text-gray-600">Status:</strong> {job.status}</div>
+          <div><strong className="text-gray-600">Start Time:</strong> {formatTime(job.startTime)}</div>
+          <div><strong className="text-gray-600">End Time:</strong> {formatTime(job.endTime)}</div>
+          <div><strong className="text-gray-600">Total Duration:</strong> {formatDuration(job.duration)}</div>
+        </div>
+        <div className="mt-6">
+          <h3 className="text-xl font-bold text-gray-800 mb-3">Assigned Technicians</h3>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="p-2">Name</th>
+                <th className="p-2">Time Started</th>
+                <th className="p-2">Time Ended</th>
+                <th className="p-2">Individual Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assignedTechs.map(tech => {
+                const timer = job.techTimers?.[tech.id];
+                return (
+                  <tr key={tech.id} className="border-b">
+                    <td className="p-2">{tech.name}</td>
+                    <td className="p-2">{timer ? formatTime(timer.startedAt) : 'Not Started'}</td>
+                    <td className="p-2">{timer ? formatTime(timer.endedAt) : 'In Progress'}</td>
+                    <td className="p-2">{timer ? formatDuration(timer.duration) : 'N/A'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsersList({ users, managers }) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  const handleAddUser = async (name, pin) => {
+    try {
+      await V2.post('/users', { name, pin });
+      setIsAdding(false);
+    } catch (err) {
+      alert(`Failed to add user: ${err?.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleUpdateUser = async (id, name, pin) => {
+    try {
+      await V2.put(`/users/${id}`, { name, pin });
+      setEditingUser(null);
+    } catch (err) {
+      alert(`Failed to update user: ${err?.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleDeleteUser = async (id) => {
+    if (window.confirm('Are you sure you want to delete this user?')) {
+      try {
+        await V2.delete(`/users/${id}`);
+      } catch (err) {
+        alert('Failed to delete user.');
+      }
+    }
+  };
+
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-md">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">Technicians</h2>
+        <button onClick={() => setIsAdding(true)} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+          Add Technician
+        </button>
+      </div>
+      <table className="w-full text-left mb-8">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="p-3">Name</th>
+            <th className="p-3">PIN</th>
+            <th className="p-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map(user => (
+            <tr key={user.id} className="border-b">
+              <td className="p-3">{user.name}</td>
+              <td className="p-3">{user.pin}</td>
+              <td className="p-3">
+                <button onClick={() => setEditingUser(user)} className="text-blue-500 hover:underline mr-4">Edit</button>
+                <button onClick={() => handleDeleteUser(user.id)} className="text-red-500 hover:underline">Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2 className="text-xl font-bold mb-4">Managers</h2>
+      <table className="w-full text-left">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="p-3">Name</th>
+            <th className="p-3">Username</th>
+          </tr>
+        </thead>
+        <tbody>
+          {managers.map(user => (
+            <tr key={user.id} className="border-b">
+              <td className="p-3">{user.name}</td>
+              <td className="p-3">{user.username}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {(isAdding || editingUser) && (
+        <UserEditModal
+          user={editingUser}
+          onClose={() => { setIsAdding(false); setEditingUser(null); }}
+          onSave={editingUser ? (name, pin) => handleUpdateUser(editingUser.id, name, pin) : handleAddUser}
+        />
+      )}
+    </div>
+  );
+}
+
+function UserEditModal({ user, onClose, onSave }) {
+  const [name, setName] = useState(user?.name || '');
+  const [pin, setPin] = useState(user?.pin || '');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(name, pin);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg p-8" onClick={e => e.stopPropagation()}>
+        <h2 className="text-2xl font-bold mb-4">{user ? 'Edit' : 'Add'} Technician</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-gray-700">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full border rounded px-3 py-2"
+              required
+            />
+          </div>
+          <div className="mb-4">
+            <label className="block text-gray-700">PIN (4 digits)</label>
+            <input
+              type="text"
+              value={pin}
+              onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              className="w-full border rounded px-3 py-2"
+              pattern="\d{4}"
+              title="PIN must be 4 digits"
+              required
+            />
+          </div>
+          <div className="flex justify-end">
+            <button type="button" onClick={onClose} className="mr-4 bg-gray-300 hover:bg-gray-400 text-black font-bold py-2 px-4 rounded">
+              Cancel
+            </button>
+            <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+              Save
             </button>
           </div>
-        </div>
-        {refreshMsg && <div className="text-sm text-green-700 bg-green-100 border border-green-200 rounded-md p-2">{refreshMsg}</div>}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <select value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm"><option value="today">Today</option><option value="7days">Last 7 Days</option><option value="30days">Last 30 Days</option><option value="custom">Custom Date</option></select>
-          {filters.dateRange === 'custom' && <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)} className="p-2 border border-gray-300 rounded-md shadow-sm"/>}
-          <select value={filters.employee} onChange={e => setFilters({...filters, employee: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{uniqueEmployees.map(e => <option key={e} value={e}>{e}</option>)}</select>
-          <select value={filters.service} onChange={e => setFilters({...filters, service: e.target.value})} className="p-2 border border-gray-300 rounded-md shadow-sm">{serviceTypes.map(s => <option key={s} value={s}>{s}</option>)}</select>
-        </div>
+        </form>
       </div>
-  <div className="bg-white p-4 rounded-xl shadow-lg flex items-center justify-between"><h3 className="text-lg font-semibold text-gray-800">Filtered Jobs Report ({filteredJobs.length})</h3><div className="flex space-x-2"><button onClick={() => exportToPDF(filteredJobs)} disabled={!librariesLoaded || exporting.pdf} className="bg-red-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-red-700 disabled:bg-gray-400">{exporting.pdf ? 'Exporting…' : 'Export PDF'}</button><button onClick={() => exportToExcel(filteredJobs)} disabled={!librariesLoaded || exporting.excel} className="bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-green-700 disabled:bg-gray-400">{exporting.excel ? 'Exporting…' : 'Export Excel'}</button></div></div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-gray-800">Jobs by Employee</h3><JobsChart data={chartData} /></div><div className="lg:col-span-2 space-y-6"><div className="bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-yellow-700">In Progress ({jobsInProgress.length})</h3><JobsTable jobs={jobsInProgress} /></div><div className="bg-white p-6 rounded-xl shadow-lg"><h3 className="text-lg font-semibold mb-4 text-green-700">Completed ({jobsCompleted.length})</h3><JobsTable jobs={jobsCompleted} /></div></div></div>
     </div>
   );
 }
 
-function TeamManagement({ users }) {
-  const [newUser, setNewUser] = useState({ name: '', pin: '' });
-  const [editingUser, setEditingUser] = useState(null);
-  const [error, setError] = useState('');
+function Reports({ jobs, users, librariesLoaded }) {
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
 
-  const handleAddUser = async (e) => {
-    e.preventDefault();
-    setError('');
-    if(!newUser.name || !newUser.pin) { setError('All fields are required.'); return; }
-    if (newUser.pin.length !== 4 || !/^\d{4}$/.test(newUser.pin)) { setError('PIN must be exactly 4 digits.'); return; }
-    if (Object.values(users).find(u => u.pin === newUser.pin)) { setError('This PIN is already in use.'); return; }
-
-    try {
-      await V2.post('/users', { name: newUser.name, pin: newUser.pin });
-      setNewUser({ name: '', pin: '' });
-    } catch (e) {
-      console.error(e);
-      if (e?.response?.status === 409) setError('This PIN is already in use.');
-      else setError('Failed to add user to the database.');
-    }
-  };
-
-  const handleUpdateUser = async (e) => {
-    e.preventDefault();
-    setError('');
-    if(!editingUser.name || !editingUser.pin) { setError('All fields are required.'); return; }
-    if (editingUser.pin.length !== 4 || !/^\d{4}$/.test(editingUser.pin)) { setError('PIN must be exactly 4 digits.'); return; }
-
-    if (Object.values(users).find(u => u.pin === editingUser.pin && u.id !== editingUser.id)) {
-      setError('This PIN is already in use by another detailer.');
+  const handleExport = (format) => {
+    if (!librariesLoaded) {
+      alert('Export libraries are not loaded yet. Please wait a moment.');
       return;
     }
 
+    const filteredJobs = jobs.filter(job => {
+      const jobDate = new Date(job.date);
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setDate(end.getDate() + 1); // include end date
+      return jobDate >= start && jobDate < end;
+    });
+
+    const data = filteredJobs.map(job => ({
+      'Date': new Date(job.date).toLocaleDateString(),
+      'Vehicle': job.vehicleDescription,
+      'VIN': job.vin,
+      'Stock #': job.stockNumber,
+      'Service': job.serviceType,
+      'Technicians': job.assignedTechnicianIds.map(id => users[id]?.name).join(', '),
+      'Start Time': formatTime(job.startTime),
+      'End Time': formatTime(job.endTime),
+      'Duration (min)': job.duration ? (job.duration / 60000).toFixed(2) : 'N/A',
+      'Status': job.status,
+    }));
+
+    if (format === 'csv') {
+      const ws = window.XLSX.utils.json_to_sheet(data);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, 'Jobs Report');
+      window.XLSX.writeFile(wb, `Jobs_Report_${startDate}_to_${endDate}.xlsx`);
+    } else if (format === 'pdf') {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.autoTable({
+        head: [Object.keys(data[0] || {})],
+        body: data.map(row => Object.values(row)),
+      });
+      doc.save(`Jobs_Report_${startDate}_to_${endDate}.pdf`);
+    }
+  };
+  
+  const handleRefreshInventory = async () => {
+    if (!window.confirm('This will fetch the latest inventory CSV and update the vehicle database. This can take a moment. Continue?')) return;
     try {
-      await V2.put(`/users/${editingUser.id}`, { name: editingUser.name, pin: editingUser.pin });
-      setEditingUser(null);
-    } catch (e) {
-      console.error(e);
-      if (e?.response?.status === 409) setError('This PIN is already in use by another detailer.');
-      else setError('Failed to update user.');
+      const res = await V2.post('/vehicles/refresh');
+      alert(`Inventory refresh complete. Total rows processed: ${res.data.total}. New vehicles: ${res.data.upserted}. Updated vehicles: ${res.data.modified}.`);
+    } catch (err) {
+      alert(`Inventory refresh failed: ${err?.response?.data?.error || err.message}`);
     }
   };
 
-  const handleRemoveUser = async (idToRemove) => {
-    try { await V2.delete(`/users/${idToRemove}`); }
-    catch (e) { console.error(e); setError('Failed to remove user.'); }
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-md">
+      <h2 className="text-xl font-bold mb-4">Generate Report</h2>
+      <div className="flex items-center space-x-4 mb-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Start Date</label>
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">End Date</label>
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" />
+        </div>
+        <div className="self-end">
+          <button onClick={() => handleExport('csv')} disabled={!librariesLoaded} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400">
+            Export Excel
+          </button>
+        </div>
+        <div className="self-end">
+          <button onClick={() => handleExport('pdf')} disabled={!librariesLoaded} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400">
+            Export PDF
+          </button>
+        </div>
+      </div>
+      <hr className="my-6" />
+      <h2 className="text-xl font-bold mb-4">Data Management</h2>
+      <button onClick={handleRefreshInventory} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded">
+        Refresh Vehicle Inventory from CSV
+      </button>
+      <p className="text-sm text-gray-500 mt-2">
+        This will pull the latest data from the configured inventory CSV URL.
+      </p>
+    </div>
+  );
+}
+
+function NewJobForm({ technicians, onJobCreated }) {
+  const [vin, setVin] = useState('');
+  const [stockNumber, setStockNumber] = useState('');
+  const [vehicleDescription, setVehicleDescription] = useState('');
+  const [serviceType, setServiceType] = useState('');
+  const [technicianId, setTechnicianId] = useState('');
+  const [coTechnicianIds, setCoTechnicianIds] = useState([]);
+  const [notes, setNotes] = useState('');
+  const [price, setPrice] = useState('');
+  const [location, setLocation] = useState('');
+
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  useEffect(() => {
+    const search = async () => {
+      if (vin.length < 3 && stockNumber.length < 3) {
+        setSearchResults([]);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const query = vin || stockNumber;
+        const res = await V2.get(`/vehicles/search?q=${query}`);
+        setSearchResults(res.data || []);
+      } catch {
+        setSearchResults([]);
+      }
+      setIsSearching(false);
+    };
+    const debounce = setTimeout(search, 300);
+    return () => clearTimeout(debounce);
+  }, [vin, stockNumber]);
+
+  const handleSelectVehicle = (vehicle) => {
+    setVin(vehicle.vin);
+    setStockNumber(vehicle.stockNumber);
+    setVehicleDescription(vehicle.vehicleDescription || toVehicleDescription(vehicle));
+    setSearchResults([]);
   };
 
-  const detailers = Object.values(users).filter(u => u.role === 'detailer');
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!technicianId) {
+      alert('Please select a primary technician.');
+      return;
+    }
+    try {
+      await V2.post('/jobs', {
+        vin, stockNumber, vehicleDescription, serviceType, technicianId,
+        technicianName: technicians.find(t => t.id === technicianId)?.name || '',
+        coTechnicianIds,
+        notes,
+        price: parseFloat(price) || null,
+        location,
+      });
+      alert('Job created successfully!');
+      onJobCreated();
+    } catch (err) {
+      alert(`Failed to create job: ${err?.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleCoTechnicianChange = (techId) => {
+    setCoTechnicianIds(prev =>
+      prev.includes(techId) ? prev.filter(id => id !== techId) : [...prev, techId]
+    );
+  };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg">
-        <h3 className="text-lg font-semibold mb-4 text-gray-800">{editingUser ? 'Edit Detailer' : 'Add New Detailer'}</h3>
-        <form onSubmit={editingUser ? handleUpdateUser : handleAddUser} className="space-y-4">
-          {error && <p className="text-red-500 text-sm">{error}</p>}
-          <input value={editingUser ? editingUser.name : newUser.name} onChange={e => editingUser ? setEditingUser({...editingUser, name: e.target.value}) : setNewUser({...newUser, name: e.target.value})} placeholder="Full Name" className="w-full p-2 border rounded-md"/>
-          <input value={editingUser ? editingUser.pin : newUser.pin} onChange={e => editingUser ? setEditingUser({...editingUser, pin: e.target.value}) : setNewUser({...newUser, pin: e.target.value})} placeholder="4-Digit PIN" type="number" maxLength="4" className="w-full p-2 border rounded-md"/>
-          <div className="flex space-x-2">
-            <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700">{editingUser ? 'Save Changes' : 'Add User'}</button>
-            {editingUser && <button type="button" onClick={() => setEditingUser(null)} className="w-full bg-gray-500 text-white py-2 rounded-md hover:bg-gray-600">Cancel</button>}
+    <div className="bg-white p-8 rounded-lg shadow-md max-w-4xl mx-auto">
+      <h2 className="text-2xl font-bold text-gray-800 mb-6">Create New Job</h2>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Vehicle Search */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700">Search VIN / Stock #</label>
+            <input
+              type="text"
+              placeholder="Start typing VIN or Stock..."
+              value={vin || stockNumber}
+              onChange={e => { setVin(e.target.value); setStockNumber(e.target.value); }}
+              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            />
+            {isSearching && <p className="text-sm text-gray-500">Searching...</p>}
+            {searchResults.length > 0 && (
+              <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded-md mt-1 max-h-60 overflow-auto">
+                {searchResults.map(v => (
+                  <li key={v.vin} onClick={() => handleSelectVehicle(v)} className="p-2 hover:bg-gray-100 cursor-pointer">
+                    {v.vehicleDescription} ({v.vin})
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        </form>
-      </div>
-      <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
-        <h3 className="text-lg font-semibold mb-4 text-gray-800">Current Detailers</h3>
-        <div className="space-y-3">
-          {detailers.map(d => (
-            <div key={d.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-              <div><p className="font-semibold text-gray-800">{d.name}</p><p className="text-sm text-gray-500">PIN: {d.pin}</p></div>
-              <div className="flex space-x-2">
-                <button onClick={() => setEditingUser(d)} className="text-blue-500 hover:text-blue-700">Edit</button>
-                <button onClick={() => handleRemoveUser(d.id)} className="text-red-500 hover:text-red-700">Remove</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function JobsChart({ data }) {
-  const maxValue = useMemo(() => Math.max(...data.map(d => d.count), 0), [data]);
-  if (data.length === 0) return <p className="text-gray-500 text-center py-8">No data for current filters.</p>;
-  return (
-    <div className="space-y-4">
-      {data.map(item => (
-        <div key={item.name} className="flex items-center group">
-          <div className="w-24 text-sm text-gray-600 truncate pr-2">{item.name}</div>
-          <div className="flex-1 bg-gray-200 rounded-full h-6">
-            <div className="bg-blue-500 h-6 rounded-full flex items-center justify-between px-2 transition-all duration-500" style={{ width: `${maxValue > 0 ? (item.count / maxValue) * 100 : 0}%`}}>
-              <span className="text-xs font-bold text-white">{item.count}</span>
-            </div>
+          {/* Vehicle Details */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Vehicle Description</label>
+            <input type="text" value={vehicleDescription} onChange={e => setVehicleDescription(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">VIN</label>
+            <input type="text" value={vin} onChange={e => setVin(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Stock #</label>
+            <input type="text" value={stockNumber} onChange={e => setStockNumber(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
           </div>
         </div>
-      ))}
+
+        <hr />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Service Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Service Type</label>
+            <select value={serviceType} onChange={e => setServiceType(e.target.value)} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+              <option value="">Select Service</option>
+              <option value="Standard Detail">Standard Detail</option>
+              <option value="Premium Detail">Premium Detail</option>
+              <option value="Interior Only">Interior Only</option>
+              <option value="Exterior Only">Exterior Only</option>
+              <option value="Wash and Vac">Wash and Vac</option>
+              <option value="Ceramic Coating">Ceramic Coating</option>
+            </select>
+          </div>
+          {/* Primary Technician */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Primary Technician</label>
+            <select value={technicianId} onChange={e => setTechnicianId(e.target.value)} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+              <option value="">Select Technician</option>
+              {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Co-Technicians */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Additional Technicians</label>
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4">
+            {technicians.filter(t => t.id !== technicianId).map(t => (
+              <label key={t.id} className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={coTechnicianIds.includes(t.id)}
+                  onChange={() => handleCoTechnicianChange(t.id)}
+                  className="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                />
+                <span>{t.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <hr />
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Price</label>
+            <input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} placeholder="e.g., 150.00" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Location</label>
+            <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g., Bay 3" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows="3" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
+        </div>
+
+        <div className="flex justify-end">
+          <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-colors">
+            Create Job
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
 
-function JobsTable({ jobs }) {
-  if (jobs.length === 0) { return <p className="text-gray-500">No jobs to display.</p>; }
-  return (
-    <div className="overflow-x-auto -mx-6">
-      <table className="min-w-full">
-        <thead className="bg-gray-50"><tr><th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase">Employee</th><th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase">Vehicle</th><th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase">Service</th><th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase">Time</th><th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase">Duration</th></tr></thead>
-        <tbody className="bg-white divide-y divide-gray-200">{jobs.map(job => <JobRow key={job.id} job={job} />)}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function JobRow({ job }) {
-  const [elapsedTime, setElapsedTime] = useState('');
-  useEffect(() => {
-    let timer;
-    if (job.status === 'In Progress') { timer = setInterval(() => setElapsedTime(formatDuration(new Date() - new Date(job.startTime))), 1000); }
-    return () => clearInterval(timer);
-  }, [job.status, job.startTime]);
-  const statusClass = job.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
-  return (
-    <tr className="hover:bg-gray-50">
-      <td className="py-4 px-6 whitespace-nowrap text-sm font-medium text-gray-900">{job.technicianName}</td>
-      <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-800"><div>{job.vehicleDescription}</div><div className="text-xs text-gray-500">Stock: {job.stockNumber} | VIN: ...{job.vin.slice(-6)}</div></td>
-      <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-500">{job.serviceType}</td>
-      <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-500"><div>Start: {formatTime(job.startTime)}</div><div>End: {job.status === 'Completed' ? formatTime(job.endTime) : '-'}</div></td>
-      <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-800 font-mono"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}`}>{job.status === 'In Progress' ? elapsedTime : formatDuration(job.duration)}</span></td>
-    </tr>
-  );
-}
- 

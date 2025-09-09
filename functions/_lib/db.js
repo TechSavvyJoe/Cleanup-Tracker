@@ -1,6 +1,7 @@
 export async function ensureSchema(DB) {
-  // Create tables if not exist. Execute statements individually for broader compatibility.
-  await DB.exec(`CREATE TABLE IF NOT EXISTS users (
+  // Create tables if not exist. Execute each statement sequentially and as a single-line SQL for D1 reliability.
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       pin TEXT UNIQUE,
@@ -12,8 +13,8 @@ export async function ensureSchema(DB) {
       active INTEGER,
       createdAt TEXT,
       updatedAt TEXT
-    );`);
-  await DB.exec(`CREATE TABLE IF NOT EXISTS vehicles (
+    )`,
+    `CREATE TABLE IF NOT EXISTS vehicles (
       vin TEXT PRIMARY KEY,
       stockNumber TEXT,
       vehicleDescription TEXT,
@@ -26,8 +27,8 @@ export async function ensureSchema(DB) {
       lastSeenAt TEXT,
       createdAt TEXT,
       updatedAt TEXT
-    );`);
-  await DB.exec(`CREATE TABLE IF NOT EXISTS jobs (
+    )`,
+    `CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       technicianId TEXT,
       technicianName TEXT,
@@ -45,8 +46,8 @@ export async function ensureSchema(DB) {
       price REAL,
       createdAt TEXT,
       updatedAt TEXT
-    );`);
-  await DB.exec(`CREATE TABLE IF NOT EXISTS job_technicians (
+    )`,
+    `CREATE TABLE IF NOT EXISTS job_technicians (
       jobId TEXT NOT NULL,
       userId TEXT NOT NULL,
       assignedAt TEXT,
@@ -54,16 +55,16 @@ export async function ensureSchema(DB) {
       endedAt TEXT,
       duration INTEGER,
       PRIMARY KEY (jobId, userId)
-    );`);
-  await DB.exec(`CREATE TABLE IF NOT EXISTS job_events (
+    )`,
+    `CREATE TABLE IF NOT EXISTS job_events (
       id TEXT PRIMARY KEY,
       jobId TEXT NOT NULL,
       type TEXT NOT NULL,
       payload TEXT,
       at TEXT NOT NULL,
       byUserId TEXT
-    );`);
-  await DB.exec(`CREATE TABLE IF NOT EXISTS inventory_refresh_log (
+    )`,
+    `CREATE TABLE IF NOT EXISTS inventory_refresh_log (
       id TEXT PRIMARY KEY,
       srcUrl TEXT,
       startedAt TEXT NOT NULL,
@@ -72,15 +73,26 @@ export async function ensureSchema(DB) {
       upserted INTEGER,
       modified INTEGER,
       error TEXT
-    );`);
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date)`,
+    `CREATE INDEX IF NOT EXISTS idx_jobs_vin ON jobs(vin)`,
+    `CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber)`,
+    `CREATE INDEX IF NOT EXISTS idx_job_events_jobId ON job_events(jobId)`,
+    `CREATE INDEX IF NOT EXISTS idx_job_technicians_jobId ON job_technicians(jobId)`,
+    `CREATE INDEX IF NOT EXISTS idx_job_technicians_userId ON job_technicians(userId)`
+  ];
 
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_vin ON jobs(vin);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_vehicles_stock ON vehicles(stockNumber);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_job_events_jobId ON job_events(jobId);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_job_technicians_jobId ON job_technicians(jobId);`);
-  await DB.exec(`CREATE INDEX IF NOT EXISTS idx_job_technicians_userId ON job_technicians(userId);`);
+  const toSingleLine = (sql) => sql.replace(/\s+/g, ' ').trim().replace(/;$/, '');
+  for (const s of statements) {
+    const sql = toSingleLine(s);
+    try {
+      await DB.prepare(sql).run();
+    } catch (e) {
+      console.error('Schema statement failed:', sql, e);
+      throw e;
+    }
+  }
 }
 
 export function bad(error, status = 500) {
@@ -98,4 +110,24 @@ export function ok(data = { ok: true }) {
 
 export function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'access-control-allow-origin': '*' } });
+}
+
+// Lightweight query helpers used by the API router
+export async function qAll(DB, sql, params = []) {
+  const stmt = params && params.length ? DB.prepare(sql).bind(...params) : DB.prepare(sql);
+  const res = await stmt.all();
+  return res?.results ?? res ?? [];
+}
+
+export async function qGet(DB, sql, params = []) {
+  const stmt = params && params.length ? DB.prepare(sql).bind(...params) : DB.prepare(sql);
+  const first = await stmt.first();
+  if (first !== undefined) return first;
+  const res = await stmt.all().catch(() => null);
+  return res && res.results && res.results.length ? res.results[0] : undefined;
+}
+
+export async function qRun(DB, sql, params = []) {
+  const stmt = params && params.length ? DB.prepare(sql).bind(...params) : DB.prepare(sql);
+  return await stmt.run();
 }
