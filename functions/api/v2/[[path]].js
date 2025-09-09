@@ -134,7 +134,34 @@ export async function onRequest(context) {
     if (segment === 'jobs') {
       if (method === 'GET') {
         try {
-          const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
+          const urlParams = new URL(request.url).searchParams;
+          let sql = 'SELECT * FROM jobs';
+          const where = [];
+          const paramsSql = [];
+          
+          if (urlParams.has('user') && urlParams.get('user')) {
+            where.push('technicianId = ?');
+            paramsSql.push(urlParams.get('user'));
+          }
+          if (urlParams.has('cleanupType') && urlParams.get('cleanupType')) {
+            where.push('serviceType = ?');
+            paramsSql.push(urlParams.get('cleanupType'));
+          }
+          if (urlParams.has('startDate') && urlParams.get('startDate')) {
+            where.push('date >= ?');
+            paramsSql.push(urlParams.get('startDate'));
+          }
+          if (urlParams.has('endDate') && urlParams.get('endDate')) {
+            where.push('date <= ?');
+            paramsSql.push(urlParams.get('endDate'));
+          }
+
+          if (where.length > 0) {
+            sql += ' WHERE ' + where.join(' AND ');
+          }
+          sql += ' ORDER BY startTime DESC';
+
+          const rows = await qAll(DB, sql, paramsSql);
           const links = await qAll(DB, 'SELECT jobId, userId, startedAt, endedAt, duration FROM job_technicians');
           const byJob = links.reduce((m, r) => { (m[r.jobId] ||= { ids: [], timers: {} }); m[r.jobId].ids.push(r.userId); m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: r.duration ?? null }; return m; }, {});
           return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
