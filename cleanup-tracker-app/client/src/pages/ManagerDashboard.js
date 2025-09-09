@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const ManagerDashboard = () => {
     const [cleanups, setCleanups] = useState([]);
-    const [users, setUsers] = useState([]);
     const [filters, setFilters] = useState({
         user: '',
         cleanupType: '',
@@ -11,22 +10,16 @@ const ManagerDashboard = () => {
         endDate: ''
     });
 
+    const fetchCleanups = useCallback(() => {
+        axios
+            .get('/api/cleanups', { params: filters })
+            .then((res) => setCleanups(res.data))
+            .catch((err) => console.log(err));
+    }, [filters]);
+
     useEffect(() => {
         fetchCleanups();
-        fetchUsers();
-    }, []);
-
-    const fetchCleanups = () => {
-        axios.get('/api/cleanups', { params: filters })
-            .then(res => setCleanups(res.data))
-            .catch(err => console.log(err));
-    };
-
-    const fetchUsers = () => {
-        // In a real app, you'd have an endpoint to get users
-        // For now, we'll just have a placeholder
-        // axios.get('/api/users').then(res => setUsers(res.data));
-    };
+    }, [fetchCleanups]);
 
     const onChange = e => {
         setFilters({ ...filters, [e.target.name]: e.target.value });
