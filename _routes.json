@@ -3,6 +3,8 @@
   "description": "Route API requests to Pages Functions",
   "include": [
     "/api",
-    "/api/*"
+  "/api/*",
+  "/api/v2/*",
+  "/api/health"
   ]
 }
