@@ -18,6 +18,17 @@ What you get:
    - Build output directory: `cleanup-tracker-app/client/build`
    - Root directory: leave blank
 
+3. Routing (avoid 405 on /api/*):
+   - Ensure Functions are picked up at repo root. If you still see 405 responses for API calls, add `_routes.json` at the repo root with:
+
+     {
+       "version": 1,
+       "description": "Route API requests to Pages Functions",
+       "include": [ "/api/*" ]
+     }
+
+   This tells Pages to route /api/* to Functions even when static assets exist.
+
 ## 2) Create and bind a D1 database
 
 1. Cloudflare Dashboard → D1 → Create database (e.g., `cleanup-tracker`).
