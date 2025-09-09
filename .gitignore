@@ -16,3 +16,6 @@ cleanup-tracker-app/client/.env
 .env
 .idea/
 .vscode/
+# Cache
+*.eslintcache
+cleanup-tracker-app/client/node_modules/.cache/
