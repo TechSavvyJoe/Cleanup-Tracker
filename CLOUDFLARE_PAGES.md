@@ -1,4 +1,13 @@
-# Deploying to Cloudflare Pages (All-in-Cloudflare)
+# Deployin## 1) Create a Cloudflare Pages project
+
+1. In Cloudflare Dashboard → Pages → Create project → Connect to Git → select this repo.
+2. Build config:
+   - Framework preset: None
+   - Build command: `npm install && npm run build`
+   - Build output directory: `cleanup-tracker-app/client/build`
+   - Root directory: (leave blank)
+
+3. This will deploy the React app from the client build, and Functions will be picked up from the root /functions directory.flare Pages (All-in-Cloudflare)
 
 This repo runs entirely on Cloudflare Pages + Functions + D1 (SQLite). No external backend needed.
 
