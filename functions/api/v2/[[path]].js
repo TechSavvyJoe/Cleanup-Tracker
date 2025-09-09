@@ -58,13 +58,7 @@ export async function onRequest(context) {
   if (!DB) {
     return bad('D1 binding missing. In Cloudflare Pages → Settings → Functions → D1 bindings, bind your database with the binding name DB.', 500);
   }
-  
-  try {
-    await ensureSchema(DB);
-  } catch (e) {
-    console.error("CRITICAL: ensureSchema failed on startup", e);
-    return bad(`Database schema initialization failed: ${e.message}`, 500);
-  }
+
 
   const url = new URL(request.url);
   const path = (params.path || '').split('/').filter(Boolean);
