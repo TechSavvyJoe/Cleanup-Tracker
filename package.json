@@ -5,6 +5,6 @@
   "description": "Root package to drive Cloudflare Pages build for the client and host Pages Functions.",
   "scripts": {
     "install": "npm --prefix cleanup-tracker-app/client install --legacy-peer-deps",
-    "build": "npm --prefix cleanup-tracker-app/client run build"
+    "build": "npm --prefix cleanup-tracker-app/client run build && rm -rf deploy && mkdir deploy && cp -r cleanup-tracker-app/client/build/* deploy/ && cp -r functions deploy/ && cp _routes.json deploy/"
   }
 }

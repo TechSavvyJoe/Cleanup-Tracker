@@ -13,21 +13,11 @@ What you get:
 1. In Cloudflare Dashboard → Pages → Create project → Connect to Git → select this repo.
 2. Build config:
    - Framework preset: None
-   - Build command:
-     `npm --prefix cleanup-tracker-app/client ci || npm --prefix cleanup-tracker-app/client install && npm --prefix cleanup-tracker-app/client run build && touch cleanup-tracker-app/client/build/.nojekyll`
-   - Build output directory: `cleanup-tracker-app/client/build`
+   - Build command: `npm install && npm run build`
+   - Build output directory: `deploy`
    - Root directory: leave blank
 
-3. Routing (avoid 405 on /api/*):
-   - Ensure Functions are picked up at repo root. If you still see 405 responses for API calls, add `_routes.json` at the repo root with:
-
-     {
-       "version": 1,
-       "description": "Route API requests to Pages Functions",
-       "include": [ "/api/*" ]
-     }
-
-   This tells Pages to route /api/* to Functions even when static assets exist.
+3. This will properly deploy both the React app and the Functions together.
 
 ## 2) Create and bind a D1 database
 
