@@ -1,1 +1,1 @@
-export { onRequest } from '../../../../functions/api/v2/[[path]].js';
+export { onRequest } from '../../../../../functions/api/v2/[[path]].js';
