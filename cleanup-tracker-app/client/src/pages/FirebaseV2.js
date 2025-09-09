@@ -87,20 +87,27 @@ export default function FirebaseV2() {
     const fetchUsers = async () => {
       try {
         const res = await V2.get('/users');
-        const data = res.data || [];
-        if (Array.isArray(data)) {
-          setUsers(normalizeUsers(data));
-        }
+        setUsers(normalizeUsers(res.data || []));
+        // If we succeed, clear any previous loading errors
+        if (error.includes('Failed to load users')) setError('');
       } catch (e) {
-        // If the primary fetch fails, assume the DB might not be initialized.
-        // Call the /init endpoint and then retry fetching users.
+        // If the primary fetch fails, let's diagnose and retry.
         try {
+          const diagRes = await V2.get('/diag');
+          if (!diagRes.data?.dbBound) {
+            setError('Critical Error: Database not bound. Please check Cloudflare D1 binding.');
+            return;
+          }
+
+          // DB is bound, so let's try to force initialization and retry.
           await V2.post('/init');
           const res2 = await V2.get('/users');
           setUsers(normalizeUsers(res2.data || []));
-        } catch (initErr) {
-          setError(prev => prev || 'Failed to load users from server.');
-          console.error("Failed to fetch users after init:", initErr);
+          if (error.includes('Failed to load users')) setError(''); // Clear error on success
+        } catch (retryErr) {
+          const errorMsg = retryErr?.response?.data?.error || retryErr.message;
+          setError(`Failed to load users from server. Reason: ${errorMsg}`);
+          console.error("Failed to fetch users after retry:", retryErr);
         }
       }
     };
@@ -147,7 +154,7 @@ export default function FirebaseV2() {
     jobsTimer = setInterval(fetchJobs, 3000);
     usersTimer = setInterval(fetchUsers, 10000);
     return () => { clearInterval(jobsTimer); clearInterval(usersTimer); };
-  }, []);
+  }, [error]);
 
   const handleLogin = (loginId, password) => {
     const potentialUser = Object.values(users).find(u => u.username?.toLowerCase() === loginId.toLowerCase());
