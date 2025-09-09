@@ -1,0 +1,10 @@
+{
+  "name": "cleanup-tracker-root",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root package to drive Cloudflare Pages build for the client and host Pages Functions.",
+  "scripts": {
+    "install": "npm --prefix cleanup-tracker-app/client ci || npm --prefix cleanup-tracker-app/client install",
+    "build": "npm --prefix cleanup-tracker-app/client run build"
+  }
+}
