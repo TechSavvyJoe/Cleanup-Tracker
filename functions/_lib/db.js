@@ -56,7 +56,9 @@ export function bad(error, status = 500) {
 export async function qAll(DB, sql, params = []) {
   const stmt = params && params.length ? DB.prepare(sql).bind(...params) : DB.prepare(sql);
   const res = await stmt.all();
-  return res?.results ?? res ?? [];
+  if (res && Array.isArray(res.results)) return res.results;
+  if (Array.isArray(res)) return res;
+  return [];
 }
 
 export async function qGet(DB, sql, params = []) {
@@ -64,7 +66,7 @@ export async function qGet(DB, sql, params = []) {
   const first = await stmt.first();
   if (first !== undefined) return first;
   const res = await stmt.all().catch(() => null);
-  return res && res.results && res.results.length ? res.results[0] : undefined;
+  return (res && res.results && res.results.length) ? res.results[0] : undefined;
 }
 
 export async function qRun(DB, sql, params = []) {

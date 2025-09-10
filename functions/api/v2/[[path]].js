@@ -28,7 +28,8 @@ function newId() {
 
 async function seedDefaultUsers(DB) {
   const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  if ((uc?.c ?? 0) > 0) return { seeded: false, count: uc.c };
+  const existingCount = (uc && uc.c != null) ? uc.c : 0;
+  if (existingCount > 0) return { seeded: false, count: existingCount };
   const now = new Date().toISOString();
   const defaults = [
     { id: newId(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
@@ -40,7 +41,7 @@ async function seedDefaultUsers(DB) {
   ).bind(u.id, u.name, u.pin, u.role, u.uid, u.username, u.password, now));
   await DB.batch(statements);
   const finalCount = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  return { seeded: true, count: finalCount?.c ?? defaults.length };
+  return { seeded: true, count: (finalCount && finalCount.c != null) ? finalCount.c : defaults.length };
 }
 
 export async function onRequest(context) {
