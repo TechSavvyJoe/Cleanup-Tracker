@@ -163,14 +163,24 @@ export async function onRequest(context) {
 
           const rows = await qAll(DB, sql, paramsSql);
           const links = await qAll(DB, 'SELECT jobId, userId, startedAt, endedAt, duration FROM job_technicians');
-          const byJob = links.reduce((m, r) => { (m[r.jobId] ||= { ids: [], timers: {} }); m[r.jobId].ids.push(r.userId); m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: r.duration ?? null }; return m; }, {});
+          const byJob = links.reduce((m, r) => {
+            if (!m[r.jobId]) m[r.jobId] = { ids: [], timers: {} };
+            m[r.jobId].ids.push(r.userId);
+            m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: (r.duration == null ? null : r.duration) };
+            return m;
+          }, {});
           return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
         } catch (err) {
           if ((err?.message || '').includes('no such table')) {
             await ensureSchema(DB);
             const rows = await qAll(DB, 'SELECT * FROM jobs ORDER BY startTime DESC');
             const links = await qAll(DB, 'SELECT jobId, userId, startedAt, endedAt, duration FROM job_technicians');
-            const byJob = links.reduce((m, r) => { (m[r.jobId] ||= { ids: [], timers: {} }); m[r.jobId].ids.push(r.userId); m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: r.duration ?? null }; return m; }, {});
+            const byJob = links.reduce((m, r) => {
+              if (!m[r.jobId]) m[r.jobId] = { ids: [], timers: {} };
+              m[r.jobId].ids.push(r.userId);
+              m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: (r.duration == null ? null : r.duration) };
+              return m;
+            }, {});
             return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
           }
           console.error(`Error fetching jobs: ${err.message}`);
