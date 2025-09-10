@@ -44,24 +44,26 @@ async function seedDefaultUsers(DB) {
 }
 
 export async function onRequest(context) {
-  const { request, env, params } = context;
-  // CORS preflight
-  if (request.method.toUpperCase() === 'OPTIONS') {
-    const reqHeaders = request.headers.get('access-control-request-headers') || 'Content-Type';
-    const headers = { ...corsHeaders };
-    delete headers['Content-Type'];
-    headers['access-control-allow-methods'] = 'GET,POST,PUT,DELETE,OPTIONS';
-    headers['access-control-allow-headers'] = reqHeaders;
-    headers['access-control-max-age'] = '86400';
-    return new Response(null, { status: 204, headers });
-  }
-
-  const url = new URL(request.url);
-  const path = (params.path || '').split('/').filter(Boolean);
-  const [segment, id, sub] = path; // e.g., jobs/:id/complete
-  const method = request.method.toUpperCase();
-
   try {
+    const request = context?.request;
+    const env = context?.env || {};
+    const params = context?.params || {};
+    // CORS preflight
+    if (request.method.toUpperCase() === 'OPTIONS') {
+      const reqHeaders = request.headers.get('access-control-request-headers') || 'Content-Type';
+      const headers = { ...corsHeaders };
+      delete headers['Content-Type'];
+      headers['access-control-allow-methods'] = 'GET,POST,PUT,DELETE,OPTIONS';
+      headers['access-control-allow-headers'] = reqHeaders;
+      headers['access-control-max-age'] = '86400';
+      return new Response(null, { status: 204, headers });
+    }
+
+    const url = new URL(request.url);
+    const path = (params.path || '').split('/').filter(Boolean);
+    const [segment, id, sub] = path; // e.g., jobs/:id/complete
+    const method = request.method.toUpperCase();
+
     // Diagnostics
     if (segment === 'diag' && method === 'GET') {
       const maybeDB = autodetectD1(env);
@@ -70,9 +72,9 @@ export async function onRequest(context) {
         return json({ dbBound: false, bindingName: bindingName || null, users: 0, jobs: 0, vehicles: 0 });
       }
       let users = 0, jobs = 0, vehicles = 0;
-      try { users = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0; } catch {}
-      try { jobs = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0; } catch {}
-      try { vehicles = (await qGet(maybeDB, 'SELECT COUNT(1) c FROM vehicles'))?.c ?? 0; } catch {}
+  try { const u = await qGet(maybeDB, 'SELECT COUNT(1) c FROM users'); users = (u && u.c != null) ? u.c : 0; } catch {}
+  try { const j = await qGet(maybeDB, 'SELECT COUNT(1) c FROM jobs'); jobs = (j && j.c != null) ? j.c : 0; } catch {}
+  try { const v = await qGet(maybeDB, 'SELECT COUNT(1) c FROM vehicles'); vehicles = (v && v.c != null) ? v.c : 0; } catch {}
       return json({ dbBound: true, bindingName, users, jobs, vehicles });
     }
 
@@ -84,9 +86,9 @@ export async function onRequest(context) {
       await ensureSchema(DB);
       await seedDefaultUsers(DB);
       const stats = {
-        users: (await qGet(DB, 'SELECT COUNT(1) c FROM users'))?.c ?? 0,
-        jobs: (await qGet(DB, 'SELECT COUNT(1) c FROM jobs'))?.c ?? 0,
-        vehicles: (await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'))?.c ?? 0,
+        users: ((await qGet(DB, 'SELECT COUNT(1) c FROM users'))?.c != null ? (await qGet(DB, 'SELECT COUNT(1) c FROM users')).c : 0),
+        jobs: ((await qGet(DB, 'SELECT COUNT(1) c FROM jobs'))?.c != null ? (await qGet(DB, 'SELECT COUNT(1) c FROM jobs')).c : 0),
+        vehicles: ((await qGet(DB, 'SELECT COUNT(1) c FROM vehicles'))?.c != null ? (await qGet(DB, 'SELECT COUNT(1) c FROM vehicles')).c : 0),
       };
       return json({ ok: true, initialized: true, ...stats });
     }
@@ -96,12 +98,12 @@ export async function onRequest(context) {
       if (method === 'GET') {
         try {
           const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
-          return json(rows.map(u => ({ _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password })));
+          return json(rows.map(function(u){ return { _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password }; }));
         } catch (e) {
           if ((e?.message || '').includes('no such table')) {
             await ensureSchema(DB);
             const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
-            return json(rows.map(u => ({ _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password })));
+            return json(rows.map(function(u){ return { _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password }; }));
           }
           throw e;
         }
@@ -169,7 +171,7 @@ export async function onRequest(context) {
             m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: (r.duration == null ? null : r.duration) };
             return m;
           }, {});
-          return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
+          return json(rows.map(function(r){ var bj = byJob[r.id] || {}; return toJobDto(r, bj.ids || [], bj.timers || {}); }));
         } catch (err) {
           if ((err?.message || '').includes('no such table')) {
             await ensureSchema(DB);
@@ -181,7 +183,7 @@ export async function onRequest(context) {
               m[r.jobId].timers[r.userId] = { startedAt: r.startedAt || null, endedAt: r.endedAt || null, duration: (r.duration == null ? null : r.duration) };
               return m;
             }, {});
-            return json(rows.map(r => toJobDto(r, byJob[r.id]?.ids || [], byJob[r.id]?.timers || {})));
+            return json(rows.map(function(r){ var bj = byJob[r.id] || {}; return toJobDto(r, bj.ids || [], bj.timers || {}); }));
           }
           console.error(`Error fetching jobs: ${err.message}`);
           return json([]);
@@ -195,7 +197,7 @@ export async function onRequest(context) {
         await qRun(DB, `INSERT INTO jobs (id,technicianId,technicianName,vin,stockNumber,vehicleDescription,serviceType,startTime,endTime,duration,status,date,notes,location,price,createdAt,updatedAt)
           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,'In Progress',?9,?10,?11,?12,?13,?13)`, [
           idv, body.technicianId, body.technicianName, body.vin, body.stockNumber, body.vehicleDescription, body.serviceType, now.toISOString(), date,
-          body.notes || null, body.location || null, body.price ?? null, now.toISOString()
+          body.notes || null, body.location || null, (body.price == null ? null : body.price), now.toISOString()
         ]);
         // record technician assignments (primary + optional co-techs)
         const techs = [body.technicianId, ...(Array.isArray(body.coTechnicianIds) ? body.coTechnicianIds : [])]
@@ -222,8 +224,8 @@ export async function onRequest(context) {
 
     // Technician join/stop endpoints
     if (segment === 'jobs' && id && sub === 'join' && method === 'PUT') {
-      const body = await request.json().catch(() => ({}));
-      const userId = body?.userId; if (!userId) return bad('userId required', 400);
+  const body = await request.json().catch(function(){ return {}; });
+  const userId = (body && body.userId) ? body.userId : null; if (!userId) return bad('userId required', 400);
       const nowIso = new Date().toISOString();
       // ensure assignment exists, then start timer
       await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt) VALUES (?1,?2,?3)', [id, userId, nowIso]);
@@ -235,8 +237,8 @@ export async function onRequest(context) {
       return ok();
     }
     if (segment === 'jobs' && id && sub === 'stop' && method === 'PUT') {
-      const body = await request.json().catch(() => ({}));
-      const userId = body?.userId; if (!userId) return bad('userId required', 400);
+  const body = await request.json().catch(function(){ return {}; });
+  const userId = (body && body.userId) ? body.userId : null; if (!userId) return bad('userId required', 400);
       const link = await qGet(DB, 'SELECT startedAt, endedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
       if (!link?.startedAt) return bad('timer not started for this tech', 409);
       if (link.endedAt) return ok(); // Already stopped
@@ -249,8 +251,9 @@ export async function onRequest(context) {
 
     // Join by VIN helper: find latest in-progress job by VIN and join
     if (segment === 'vehicles' && path[1] === 'join-by-vin' && method === 'PUT') {
-      const body = await request.json().catch(() => ({}));
-      const { vin, userId } = body || {};
+  const body = await request.json().catch(function(){ return {}; });
+  const vin = (body && body.vin) ? body.vin : null;
+  const userId = (body && body.userId) ? body.userId : null;
       if (!vin || !userId) return bad('vin and userId required', 400);
       const job = await qGet(DB, 'SELECT id FROM jobs WHERE UPPER(vin) = ?1 AND status = ?2 ORDER BY startTime DESC LIMIT 1', [vin.toUpperCase(), 'In Progress']);
       if (!job?.id) return bad('No in-progress job found for VIN', 404);
