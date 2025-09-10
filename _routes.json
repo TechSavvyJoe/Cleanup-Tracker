@@ -2,14 +2,10 @@
   "version": 1,
   "description": "Route API requests to Pages Functions",
   "include": [
-    "/debug123",
-    "/direct-test",
-    "/test",
-    "/api",
-    "/api/*",
-    "/api/v2",
-    "/api/v2/*",
-    "/api/health"
+  "/api/*",
+  "/debug123",
+  "/direct-test",
+  "/test"
   ],
   "exclude": []
 }
