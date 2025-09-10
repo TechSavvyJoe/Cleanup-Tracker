@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const ManagerDashboard = () => {
     const [cleanups, setCleanups] = useState([]);
-    const [users, setUsers] = useState([]);
     const [filters, setFilters] = useState({
         user: '',
         cleanupType: '',
@@ -11,22 +10,16 @@ const ManagerDashboard = () => {
         endDate: ''
     });
 
+    const fetchCleanups = useCallback(() => {
+        axios
+            .get('/api/v2/jobs', { params: filters })
+            .then((res) => setCleanups(res.data))
+            .catch((err) => console.log(err));
+    }, [filters]);
+
     useEffect(() => {
         fetchCleanups();
-        fetchUsers();
-    }, []);
-
-    const fetchCleanups = () => {
-        axios.get('/api/cleanups', { params: filters })
-            .then(res => setCleanups(res.data))
-            .catch(err => console.log(err));
-    };
-
-    const fetchUsers = () => {
-        // In a real app, you'd have an endpoint to get users
-        // For now, we'll just have a placeholder
-        // axios.get('/api/users').then(res => setUsers(res.data));
-    };
+    }, [fetchCleanups]);
 
     const onChange = e => {
         setFilters({ ...filters, [e.target.name]: e.target.value });
@@ -44,18 +37,18 @@ const ManagerDashboard = () => {
         cleanups.forEach(cleanup => {
             if (cleanup.duration) {
                 // By User
-                if (!userTimes[cleanup.user.username]) {
-                    userTimes[cleanup.user.username] = { total: 0, count: 0 };
+                if (!userTimes[cleanup.technicianName]) {
+                    userTimes[cleanup.technicianName] = { total: 0, count: 0 };
                 }
-                userTimes[cleanup.user.username].total += cleanup.duration;
-                userTimes[cleanup.user.username].count++;
+                userTimes[cleanup.technicianName].total += cleanup.duration;
+                userTimes[cleanup.technicianName].count++;
 
                 // By Type
-                if (!typeTimes[cleanup.cleanupType]) {
-                    typeTimes[cleanup.cleanupType] = { total: 0, count: 0 };
+                if (!typeTimes[cleanup.serviceType]) {
+                    typeTimes[cleanup.serviceType] = { total: 0, count: 0 };
                 }
-                typeTimes[cleanup.cleanupType].total += cleanup.duration;
-                typeTimes[cleanup.cleanupType].count++;
+                typeTimes[cleanup.serviceType].total += cleanup.duration;
+                typeTimes[cleanup.serviceType].count++;
             }
         });
 
@@ -124,9 +117,9 @@ const ManagerDashboard = () => {
                     {cleanups.map(cleanup => (
                         <tr key={cleanup._id}>
                             <td>{new Date(cleanup.startTime).toLocaleString()}</td>
-                            <td>{cleanup.vehicle.year} {cleanup.vehicle.make} {cleanup.vehicle.model}</td>
-                            <td>{cleanup.user.username}</td>
-                            <td>{cleanup.cleanupType}</td>
+                            <td>{cleanup.vehicleDescription}</td>
+                            <td>{cleanup.technicianName}</td>
+                            <td>{cleanup.serviceType}</td>
                             <td>{cleanup.duration}</td>
                         </tr>
                     ))}

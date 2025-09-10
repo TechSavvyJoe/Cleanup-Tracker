@@ -54,7 +54,10 @@ function App() {
         <div className="App">
           <Navbar />
           <Switch>
-            <Route exact path="/" component={Landing} />
+            {/* Default to the V2 interface */}
+            <Route exact path="/" component={FirebaseV2} />
+            {/* Optional: keep legacy landing available */}
+            <Route exact path="/legacy" component={Landing} />
             <Route exact path="/register" component={Register} />
             <Route exact path="/login" component={Login} />
             <Route exact path="/v2" component={FirebaseV2} />

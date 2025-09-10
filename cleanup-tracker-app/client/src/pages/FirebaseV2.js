@@ -993,12 +993,13 @@ function NewJobForm({ technicians, onJobCreated }) {
             <label className="block text-sm font-medium text-gray-700">Service Type</label>
             <select value={serviceType} onChange={e => setServiceType(e.target.value)} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
               <option value="">Select Service</option>
-              <option value="Standard Detail">Standard Detail</option>
-              <option value="Premium Detail">Premium Detail</option>
-              <option value="Interior Only">Interior Only</option>
-              <option value="Exterior Only">Exterior Only</option>
-              <option value="Wash and Vac">Wash and Vac</option>
-              <option value="Ceramic Coating">Ceramic Coating</option>
+              <option value="Detail">Detail</option>
+              <option value="Delivery">Delivery</option>
+              <option value="Rewash">Rewash</option>
+              <option value="Lot Car">Lot Car</option>
+              <option value="FCTP">FCTP</option>
+              <option value="Cleanup">Cleanup</option>
+              <option value="Showroom">Showroom</option>
             </select>
           </div>
           {/* Primary Technician */}
