@@ -6,6 +6,7 @@ export async function ensureSchema(DB) {
     `CREATE TABLE IF NOT EXISTS jobs ( id TEXT PRIMARY KEY, technicianId TEXT, technicianName TEXT, vin TEXT, stockNumber TEXT, vehicleDescription TEXT, serviceType TEXT, startTime TEXT, endTime TEXT, duration INTEGER, status TEXT, date TEXT, notes TEXT, location TEXT, price REAL, createdAt TEXT, updatedAt TEXT )`,
     `CREATE TABLE IF NOT EXISTS job_events ( id TEXT PRIMARY KEY, jobId TEXT NOT NULL, type TEXT NOT NULL, payload TEXT, at TEXT NOT NULL, byUserId TEXT )`,
     `CREATE TABLE IF NOT EXISTS job_technicians ( jobId TEXT NOT NULL, userId TEXT NOT NULL, assignedAt TEXT, startedAt TEXT, endedAt TEXT, duration INTEGER, PRIMARY KEY (jobId, userId) )`,
+  `CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT )`,
     `CREATE TABLE IF NOT EXISTS inventory_refresh_log ( id TEXT PRIMARY KEY, srcUrl TEXT, startedAt TEXT NOT NULL, finishedAt TEXT, rowsTotal INTEGER, upserted INTEGER, modified INTEGER, error TEXT )`,
     `CREATE INDEX IF NOT EXISTS idx_jobs_date ON jobs(date)`,
     `CREATE INDEX IF NOT EXISTS idx_jobs_vin ON jobs(vin)`,

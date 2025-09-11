@@ -1,8 +1,38 @@
-# Deploying on Cloudflare Pages
+# Cleanup Tracker – Cloudflare Pages & Functions
+
+Prereqs:
+
+- Node 18+
+- npm i -D wrangler@4 (already added to devDependencies)
+
+Run:
+
+1) Build client
+
+  npm run build --workspace=cleanup-tracker-client
+
+2) Start Pages dev (Functions served from repo root)
+
+  npm run start:server
+
+Open: <http://localhost:8788>
+
+Smoke test API:
+
+  curl -sS <http://localhost:8788/api/v2/diag>
+
+  curl -sS <http://localhost:8788/api/v2/init>
+
+  curl -sS -X POST <http://localhost:8788/api/v2/auth/detailer> -H 'Content-Type: application/json' -d '{"employeeId":"1709"}'
+
+If port 8788 is busy:
+
+  lsof -ti :8788 | xargs -r kill -9
+\n## Deploying on Cloudflare Pages
 
 This repository runs entirely on Cloudflare Pages using Pages Functions and a D1 database. No external backend is required.
 
-## 1) Create a Cloudflare Pages project
+\n### 1) Create a Cloudflare Pages project
 1. In the Cloudflare Dashboard go to **Pages** → **Create project** and connect to this Git repository.
 2. Build configuration:
    - **Framework preset:** None
@@ -11,17 +41,17 @@ This repository runs entirely on Cloudflare Pages using Pages Functions and a D1
    - **Root directory:** leave blank
 3. This builds the React client and deploys the serverless functions under `/functions`.
 
-## 2) Create and bind a D1 database
+\n### 2) Create and bind a D1 database
 1. Cloudflare Dashboard → **D1** → create a database (e.g. `cleanup-tracker`).
 2. Pages → your project → **Settings** → **Functions** → **D1 bindings**: add a binding with
    - **Variable name:** `DB`
    - **Database:** the database created above
 3. Redeploy if prompted. Tables are created on first API call automatically.
 
-## 3) Optional environment variables
+\n### 3) Optional environment variables
 - `INVENTORY_CSV_URL` – public CSV URL used by the inventory refresh endpoint.
 
-## 4) Functions overview
+\n### 4) Functions overview
 - `functions/api/v2/[[path]].js` implements:
   - `GET /api/v2/diag` — diagnostic information (binding name and table counts)
   - `POST /api/v2/init` — ensure schema and seed defaults idempotently
@@ -39,15 +69,15 @@ This repository runs entirely on Cloudflare Pages using Pages Functions and a D1
   - `POST /api/v2/vehicles/refresh` — fetch CSV from `INVENTORY_CSV_URL` and upsert
 - `functions/api/health.js` — `/api/health` returns `{ ok: true }`
 
-## 5) Client configuration
+\n### 5) Client configuration
 The React app calls relative `/api/v2` paths by default, so no additional configuration is needed.
 
-## 6) First run tips
+\n### 6) First run tips
 - After deploy, open your Pages URL; the app will attempt to load users.
 - If the list is empty, it will auto-seed via `/api/v2/init` and reload.
 - Use **Reports → "Refresh Vehicle Inventory from CSV"** to import vehicles from your CSV.
 
-## 7) Local development (optional)
+\n### 7) Local development (optional)
 - Install Wrangler: `npm i -g wrangler`
 - Build the client locally first, or point Pages dev to the client build folder:
   `wrangler pages dev cleanup-tracker-app/client/build`

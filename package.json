@@ -1,10 +1,17 @@
 {
-  "name": "cleanup-tracker-root",
+  "name": "cleanup-tracker-monorepo",
   "private": true,
-  "version": "1.0.0",
-  "description": "Root package to drive Cloudflare Pages build for the client and host Pages Functions.",
+  "workspaces": [
+    "cleanup-tracker-app/client"
+  ],
   "scripts": {
-    "install": "npm --prefix cleanup-tracker-app/client install --legacy-peer-deps",
-    "build": "npm --prefix cleanup-tracker-app/client run build && cp -r functions cleanup-tracker-app/client/build/ && cp _routes.json cleanup-tracker-app/client/build/"
+  "dev:client": "npm run start --workspace=cleanup-tracker-client",
+  "build": "npm run build --workspace=cleanup-tracker-client",
+  "dev:server": "npx wrangler@4 pages dev cleanup-tracker-app/client/build --compatibility-date=2023-05-18 --local --port=8788",
+  "start:server": "npm run dev:server",
+  "dev:all": "npm run build --workspace=cleanup-tracker-client && npx wrangler@4 pages dev cleanup-tracker-app/client/build --compatibility-date=2023-05-18 --local --port=8788"
+  },
+  "devDependencies": {
+  "wrangler": "^4.35.0"
   }
 }

@@ -27,21 +27,37 @@ function newId() {
 }
 
 async function seedDefaultUsers(DB) {
-  const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  const existingCount = (uc && uc.c != null) ? uc.c : 0;
-  if (existingCount > 0) return { seeded: false, count: existingCount };
+  // Ensure the 3 expected defaults exist; add missing ones without deleting others.
   const now = new Date().toISOString();
   const defaults = [
-    { id: newId(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
-    { id: newId(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
-    { id: newId(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+  { name: 'Manager', pin: '0000', role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+    { name: 'Brian', pin: '1709', role: 'detailer', uid: 'det-brian', username: null, password: null },
+    { name: 'Alfred', pin: '1716', role: 'detailer', uid: 'det-alfred', username: null, password: null },
   ];
-  const statements = defaults.map(u => DB.prepare(
-    'INSERT INTO users (id,name,pin,role,uid,username,password,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)'
-  ).bind(u.id, u.name, u.pin, u.role, u.uid, u.username, u.password, now));
-  await DB.batch(statements);
+
+  let inserted = 0;
+
+  for (const d of defaults) {
+    // Check by unique fields: manager by username, detailers by pin
+    let existing;
+    if (d.role === 'manager') {
+      existing = await qGet(DB, 'SELECT id FROM users WHERE role = ?1 AND username = ?2', [d.role, d.username]);
+    } else {
+      existing = await qGet(DB, 'SELECT id FROM users WHERE role = ?1 AND pin = ?2', [d.role, d.pin]);
+    }
+    if (!existing) {
+      const id = newId();
+      await qRun(
+        DB,
+        'INSERT INTO users (id,name,pin,role,uid,username,password,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)',
+        [id, d.name, d.pin, d.role, d.uid, d.username, d.password, now]
+      );
+      inserted++;
+    }
+  }
+
   const finalCount = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  return { seeded: true, count: (finalCount && finalCount.c != null) ? finalCount.c : defaults.length };
+  return { seeded: inserted > 0, inserted, count: (finalCount && finalCount.c != null) ? finalCount.c : null };
 }
 
 export async function onRequest(context) {
@@ -61,7 +77,12 @@ export async function onRequest(context) {
     }
 
     const url = new URL(request.url);
-    const path = (params.path || '').split('/').filter(Boolean);
+    const paramPath = (params && 'path' in params) ? params.path : '';
+    const path = Array.isArray(paramPath)
+      ? paramPath
+      : String(paramPath || '')
+          .split('/')
+          .filter(Boolean);
     const [segment, id, sub] = path; // e.g., jobs/:id/complete
     const method = request.method.toUpperCase();
 
@@ -99,12 +120,18 @@ export async function onRequest(context) {
       if (method === 'GET') {
         try {
           const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
-          return json(rows.map(function(u){ return { _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password }; }));
+          if (!rows || rows.length === 0) {
+            await seedDefaultUsers(DB);
+            const rows2 = await qAll(DB, 'SELECT * FROM users ORDER BY name');
+            return json(rows2.map(function(u){ return mapUser(u); }));
+          }
+          return json(rows.map(function(u){ return mapUser(u); }));
         } catch (e) {
           if ((e?.message || '').includes('no such table')) {
             await ensureSchema(DB);
+            await seedDefaultUsers(DB);
             const rows = await qAll(DB, 'SELECT * FROM users ORDER BY name');
-            return json(rows.map(function(u){ return { _id: u.id, name: u.name, pin: u.pin, role: u.role, uid: u.uid, username: u.username, password: u.password }; }));
+            return json(rows.map(function(u){ return mapUser(u); }));
           }
           throw e;
         }
@@ -112,19 +139,21 @@ export async function onRequest(context) {
       if (method === 'POST') {
         const body = await request.json();
         if (!body?.name || !body?.pin) return bad('name and pin required', 400);
+        const role = (body.role === 'manager' ? 'manager' : 'detailer');
         const existing = await qGet(DB, 'SELECT id FROM users WHERE pin = ?1', [String(body.pin)]);
         if (existing) return bad('PIN already in use', 409);
         const idv = newId();
-        const uid = `det-${idv.slice(0,8)}`;
-        await qRun(DB, 'INSERT INTO users (id,name,pin,role,uid,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?6)', [idv, body.name, String(body.pin), 'detailer', uid, new Date().toISOString()]);
-        return created({ _id: idv, name: body.name, pin: String(body.pin), role: 'detailer', uid });
+        const uid = `${role === 'manager' ? 'mgr' : 'det'}-${idv.slice(0,8)}`;
+        await qRun(DB, 'INSERT INTO users (id,name,pin,role,uid,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?6)', [idv, body.name, String(body.pin), role, uid, new Date().toISOString()]);
+        return created({ id: idv, _id: idv, name: body.name, pin: String(body.pin), role, uid });
       }
       if (id && method === 'PUT') {
         const body = await request.json();
         if (!body?.name || !body?.pin) return bad('name and pin required', 400);
+        const role = (body.role === 'manager' ? 'manager' : 'detailer');
         const other = await qGet(DB, 'SELECT id FROM users WHERE pin = ?1 AND id <> ?2', [String(body.pin), id]);
         if (other) return bad('PIN already in use', 409);
-        await qRun(DB, 'UPDATE users SET name = ?1, pin = ?2, updatedAt = ?3 WHERE id = ?4', [body.name, String(body.pin), new Date().toISOString(), id]);
+        await qRun(DB, 'UPDATE users SET name = ?1, pin = ?2, role = ?3, updatedAt = ?4 WHERE id = ?5', [body.name, String(body.pin), role, new Date().toISOString(), id]);
         return ok();
       }
       if (id && method === 'DELETE') {
@@ -133,8 +162,64 @@ export async function onRequest(context) {
       }
     }
 
+    // Auth
+    if (segment === 'auth') {
+      // Unified PIN login for both roles
+      if (path[1] === 'login' && method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const employeeId = (body.employeeId || body.pin || '').toString().trim();
+        if (!employeeId) return bad('employeeId required', 400);
+        await ensureSchema(DB);
+        // one-time migration: if a manager exists with null pin, set a default pin
+        try {
+          const mgrNoPin = await qGet(DB, 'SELECT id FROM users WHERE role = ?1 AND (pin IS NULL OR pin = "") LIMIT 1', ['manager']);
+          if (mgrNoPin) {
+            await qRun(DB, 'UPDATE users SET pin = ?1, updatedAt = ?2 WHERE id = ?3', ['0000', new Date().toISOString(), mgrNoPin.id]);
+          }
+        } catch (_) {}
+        const u = await qGet(DB, 'SELECT * FROM users WHERE pin = ?1', [employeeId]);
+        if (!u) return bad('Invalid employee id', 401);
+        return json({ user: mapUser(u) });
+      }
+      if (path[1] === 'detailer' && method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const employeeId = (body.employeeId || body.pin || '').toString().trim();
+        if (!employeeId) return bad('employeeId required', 400);
+        await ensureSchema(DB);
+        const u = await qGet(DB, 'SELECT * FROM users WHERE role = ?1 AND pin = ?2', ['detailer', employeeId]);
+        if (!u) return bad('Invalid employee id', 401);
+        return json({ user: mapUser(u) });
+      }
+      if (path[1] === 'manager' && method === 'POST') {
+        // Backward-compat: allow either pin or username/password
+        const body = await request.json().catch(() => ({}));
+        const pin = (body.employeeId || body.pin || '').toString().trim();
+        await ensureSchema(DB);
+        if (pin) {
+          const u = await qGet(DB, 'SELECT * FROM users WHERE role = ?1 AND pin = ?2', ['manager', pin]);
+          if (!u) return bad('Invalid employee id', 401);
+          return json({ user: mapUser(u) });
+        }
+        const username = (body.username || '').toString().trim();
+        const password = (body.password || '').toString();
+        if (!username || !password) return bad('employeeId required', 400);
+        const u = await qGet(DB, 'SELECT * FROM users WHERE role = ?1 AND username = ?2 AND password = ?3', ['manager', username, password]);
+        if (!u) return bad('Invalid credentials', 401);
+        return json({ user: mapUser(u) });
+      }
+    }
+
     // Jobs
     if (segment === 'jobs') {
+      // Job details with technicians and events
+      if (id && method === 'GET') {
+        await ensureSchema(DB);
+        const job = await qGet(DB, 'SELECT * FROM jobs WHERE id = ?1', [id]);
+        if (!job) return bad('job not found', 404);
+        const techs = await qAll(DB, 'SELECT userId, assignedAt, startedAt, endedAt, duration FROM job_technicians WHERE jobId = ?1', [id]);
+        const events = await qAll(DB, 'SELECT id, type, payload, at, byUserId FROM job_events WHERE jobId = ?1 ORDER BY at ASC', [id]);
+        return json({ job, technicians: techs, events });
+      }
       if (method === 'GET') {
         try {
           const urlParams = new URL(request.url).searchParams;
@@ -210,7 +295,7 @@ export async function onRequest(context) {
         }
         // job event
         await qRun(DB, `INSERT INTO job_events (id, jobId, type, payload, at, byUserId) VALUES (?1,?2,?3,?4,?5,?6)`, [newId(), idv, 'job_started', JSON.stringify(body || {}), now.toISOString(), body.technicianId || null]);
-        return created({ _id: idv });
+        return created({ id: idv, _id: idv });
       }
       if (id && sub === 'complete' && method === 'PUT') {
         const job = await qGet(DB, 'SELECT startTime FROM jobs WHERE id = ?1', [id]);
@@ -240,7 +325,15 @@ export async function onRequest(context) {
     if (segment === 'jobs' && id && sub === 'stop' && method === 'PUT') {
   const body = await request.json().catch(function(){ return {}; });
   const userId = (body && body.userId) ? body.userId : null; if (!userId) return bad('userId required', 400);
-      const link = await qGet(DB, 'SELECT startedAt, endedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      let link = await qGet(DB, 'SELECT startedAt, endedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      if (!link?.startedAt) {
+        // Fallback: initialize timer using job.startTime if available, else now
+        const job = await qGet(DB, 'SELECT startTime FROM jobs WHERE id = ?1', [id]);
+        const startIso = (job && job.startTime) ? job.startTime : new Date().toISOString();
+        await qRun(DB, 'INSERT OR IGNORE INTO job_technicians (jobId, userId, assignedAt, startedAt) VALUES (?1,?2,?3,?4)', [id, userId, startIso, startIso]);
+        await qRun(DB, 'UPDATE job_technicians SET startedAt = COALESCE(startedAt, ?1) WHERE jobId = ?2 AND userId = ?3', [startIso, id, userId]);
+        link = await qGet(DB, 'SELECT startedAt, endedAt FROM job_technicians WHERE jobId = ?1 AND userId = ?2', [id, userId]);
+      }
       if (!link?.startedAt) return bad('timer not started for this tech', 409);
       if (link.endedAt) return ok(); // Already stopped
       const now = new Date();
@@ -281,9 +374,24 @@ export async function onRequest(context) {
         }
         return json(rows.map(v => ({ ...v, vehicleDescription: v.vehicleDescription || toVehicleDescription(v) })));
       }
-      if (path[1] === 'refresh' && method === 'POST') {
-        const src = env.INVENTORY_CSV_URL;
-        if (!src) return bad('INVENTORY_CSV_URL not set', 500);
+      if (path[1] === 'refresh' && (method === 'POST' || method === 'GET')) {
+        await ensureSchema(DB);
+        // Source priority: settings.inventoryCsvUrl > env.INVENTORY_CSV_URL > /inventory.csv
+        let src = null;
+        try {
+          const s = await qGet(DB, 'SELECT value FROM settings WHERE key = ?1', ['inventoryCsvUrl']);
+          if (s && s.value) src = s.value;
+        } catch (_) {}
+        if (!src) src = env.INVENTORY_CSV_URL || null;
+        if (!src) {
+          try {
+            const base = new URL(request.url);
+            src = new URL('/inventory.csv', base).toString();
+          } catch (_) {
+            // Fallback to a relative path string (may still work in some environments)
+            src = '/inventory.csv';
+          }
+        }
         const startedAt = new Date();
         const res = await fetch(src);
         if (!res.ok) return bad('Failed to fetch CSV', 502);
@@ -362,23 +470,59 @@ export async function onRequest(context) {
         if (insertStmts.length > 0) await DB.batch(insertStmts);
         if (updateStmts.length > 0) await DB.batch(updateStmts);
 
-        const finishedAt = new Date();
+  const finishedAt = new Date();
         await qRun(DB, `INSERT INTO inventory_refresh_log (id, srcUrl, startedAt, finishedAt, rowsTotal, upserted, modified, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`,
           [newId(), src, startedAt.toISOString(), finishedAt.toISOString(), total, upserted, modified, null]);
-        return json({ upserted, modified, total });
+  return json({ upserted, modified, total, src });
+      }
+      if (path[1] === 'set-csv' && method === 'POST') {
+        await ensureSchema(DB);
+        const body = await request.json().catch(() => ({}));
+        const url = (body && body.url) ? String(body.url).trim() : '';
+        if (!url) return bad('url required', 400);
+        await qRun(DB, 'INSERT INTO settings (key, value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value', ['inventoryCsvUrl', url]);
+        return ok({ saved: true, url });
       }
     }
 
-    return bad('Not found', 404);
+    // Settings
+    if (segment === 'settings') {
+      if (method === 'GET') {
+        await ensureSchema(DB);
+        const rows = await qAll(DB, 'SELECT key, value FROM settings');
+        const obj = rows.reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+        if (!obj.siteTitle) obj.siteTitle = 'Cleanup Tracker';
+        return json(obj);
+      }
+      if (method === 'PUT') {
+        const body = await request.json().catch(() => ({}));
+        const key = (body.key || '').toString().trim();
+        const value = (body.value == null ? '' : String(body.value));
+        if (!key) return bad('key required', 400);
+        await qRun(DB, 'INSERT INTO settings (key, value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]);
+        return ok({ saved: true, key, value });
+      }
+    }
+
+  return bad('Not found', 404);
   } catch (e) {
-    console.error(`Unhandled error on ${method} ${url.pathname}:`, e);
+    // Avoid referencing variables scoped inside the try block (like method/url)
+    try {
+      const req = (typeof context !== 'undefined' && context && context.request) ? context.request : null;
+      const m = req ? (req.method || 'UNKNOWN') : 'UNKNOWN';
+      const p = req ? (new URL(req.url)).pathname : 'UNKNOWN_PATH';
+      console.error(`Unhandled error on ${m} ${p}:`, e);
+    } catch (logErr) {
+      console.error('Unhandled error (logging failed):', e, logErr);
+    }
     return bad(`Error: ${e.message || e}`, 500);
   }
 }
 
 function toJobDto(j, assignedIds = [], techTimers = {}) {
   return {
-    _id: j.id,
+  _id: j.id,
+  id: j.id,
     technicianId: j.technicianId,
     technicianName: j.technicianName,
     assignedTechnicianIds: assignedIds,
@@ -395,6 +539,19 @@ function toJobDto(j, assignedIds = [], techTimers = {}) {
     notes: j.notes,
     location: j.location,
     price: j.price,
+  };
+}
+
+function mapUser(u) {
+  return {
+    id: u.id,
+    _id: u.id,
+    name: u.name,
+    pin: u.pin,
+    role: u.role,
+    uid: u.uid,
+    username: u.username,
+    password: u.password,
   };
 }
 

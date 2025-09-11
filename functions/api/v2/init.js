@@ -20,21 +20,32 @@ function newId() {
 }
 
 async function seedDefaultUsers(DB) {
-  const uc = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  const existingCount = (uc && uc.c != null) ? uc.c : 0;
-  if (existingCount > 0) return { seeded: false, count: existingCount };
+  // Ensure Manager, Brian (1709), Alfred (1716) exist without duplicating others
   const now = new Date().toISOString();
   const defaults = [
-    { id: newId(), name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
-    { id: newId(), name: 'Alice Detail', pin: '1111', role: 'detailer', uid: 'det-1', username: null, password: null },
-    { id: newId(), name: 'Bob Detail', pin: '2222', role: 'detailer', uid: 'det-2', username: null, password: null },
+    { name: 'Manager', pin: null, role: 'manager', uid: 'mgr-1', username: 'manager', password: '1234' },
+    { name: 'Brian', pin: '1709', role: 'detailer', uid: 'det-brian', username: null, password: null },
+    { name: 'Alfred', pin: '1716', role: 'detailer', uid: 'det-alfred', username: null, password: null },
   ];
-  const statements = defaults.map(u => DB.prepare(
-    'INSERT INTO users (id,name,pin,role,uid,username,password,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)'
-  ).bind(u.id, u.name, u.pin, u.role, u.uid, u.username, u.password, now));
-  await DB.batch(statements);
+
+  let inserted = 0;
+  for (const d of defaults) {
+    let existing;
+    if (d.role === 'manager') {
+      existing = await qGet(DB, 'SELECT id FROM users WHERE role = ?1 AND username = ?2', [d.role, d.username]);
+    } else {
+      existing = await qGet(DB, 'SELECT id FROM users WHERE role = ?1 AND pin = ?2', [d.role, d.pin]);
+    }
+    if (!existing) {
+      const id = newId();
+      await qRun(DB, 'INSERT INTO users (id,name,pin,role,uid,username,password,createdAt,updatedAt) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)', [
+        id, d.name, d.pin, d.role, d.uid, d.username, d.password, now
+      ]);
+      inserted++;
+    }
+  }
   const finalCount = await qGet(DB, 'SELECT COUNT(1) c FROM users');
-  return { seeded: true, count: (finalCount && finalCount.c != null) ? finalCount.c : defaults.length };
+  return { seeded: inserted > 0, inserted, count: (finalCount && finalCount.c != null) ? finalCount.c : null };
 }
 
 export async function onRequest(context) {

@@ -1,11 +1,7 @@
 {
   "version": 1,
-  "description": "Route API requests to Pages Functions",
   "include": [
-  "/api/*",
-  "/debug123",
-  "/direct-test",
-  "/test"
+    "/*"
   ],
   "exclude": []
 }

@@ -1,636 +1,2625 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
 import VinScanner from '../components/VinScanner';
+import axios from 'axios';
 
-// REST API base
-const API_BASE = process.env.REACT_APP_API_URL || '';
-const V2 = axios.create({ baseURL: `${API_BASE}/api/v2` });
-
-// Helper to build a vehicle description if needed
-const toVehicleDescription = (v) => v.vehicle || `${v.year || ''} ${v.make || ''} ${v.model || ''}`.trim();
-
-const formatTime = (date) => date ? new Date(date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A';
-const formatDuration = (milliseconds) => {
-  if (milliseconds === null || milliseconds === undefined) return 'In Progress';
-  if (milliseconds < 0) return '0s';
-  const totalSeconds = Math.floor(milliseconds / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  let durationString = '';
-  if (hours > 0) durationString += `${hours}h `;
-  if (minutes > 0) durationString += `${minutes}m `;
-  if (seconds >= 0) durationString += `${seconds}s`;
-  return durationString.trim() || '0s';
+// Utility functions for date/time handling with Eastern Time support
+const DateUtils = {
+  // Get current local date in YYYY-MM-DD format (Eastern Time)
+  getLocalDateString: (date = new Date()) => {
+    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000))
+      .toISOString().slice(0, 10);
+  },
+  
+  // Check if date is today (Eastern Time)
+  isToday: (date) => {
+    if (!date) return false;
+    const inputDate = new Date(date);
+    if (isNaN(inputDate.getTime())) return false;
+    return DateUtils.getLocalDateString(inputDate) === DateUtils.getLocalDateString();
+  },
+  
+  // Check if date is this week (Eastern Time)
+  isThisWeek: (date) => {
+    if (!date) return false;
+    const inputDate = new Date(date);
+    if (isNaN(inputDate.getTime())) return false;
+    const now = new Date();
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const weekEnd = new Date(weekStart.getTime() + (7 * 24 * 60 * 60 * 1000));
+    return inputDate >= weekStart && inputDate < weekEnd;
+  },
+  
+  // Check if date is this month (Eastern Time)
+  isThisMonth: (date) => {
+    if (!date) return false;
+    const inputDate = new Date(date);
+    if (isNaN(inputDate.getTime())) return false;
+    const now = new Date();
+    return inputDate.getMonth() === now.getMonth() && inputDate.getFullYear() === now.getFullYear();
+  },
+  
+  // Format date safely
+  formatDate: (date, options = {}) => {
+    if (!date) return 'N/A';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'Invalid Date';
+    return d.toLocaleString('en-US', { 
+      timeZone: 'America/New_York',
+      ...options 
+    });
+  },
+  
+  // Format duration from minutes to readable format
+  formatDuration: (minutes) => {
+    if (!minutes || minutes < 0) return 'N/A';
+    // Cap unrealistic durations at 24 hours
+    const cappedMinutes = Math.min(minutes, 24 * 60);
+    const hours = Math.floor(cappedMinutes / 60);
+    const mins = Math.round(cappedMinutes % 60);
+    if (hours === 0) return `${mins}min`;
+    return `${hours}h ${mins}m`;
+  },
+  
+  // Calculate duration between two dates in minutes
+  calculateDuration: (startDate, endDate) => {
+    if (!startDate || !endDate) return 0;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
+    const diffMs = end.getTime() - start.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    // Cap at 24 hours to prevent unrealistic durations
+    return Math.max(0, Math.min(diffMins, 24 * 60));
+  },
+  
+  // Validate if a date string/object is valid
+  isValidDate: (date) => {
+    if (!date) return false;
+    const d = new Date(date);
+    return !isNaN(d.getTime());
+  }
 };
 
-const Spinner = () => (<div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>);
-
-export default function FirebaseV2() {
-  const [user, setUser] = useState(null);
-  const [users, setUsers] = useState({}); // map of id -> user
-  const [jobs, setJobs] = useState([]);
-  const [error, setError] = useState('');
-  const [librariesLoaded, setLibrariesLoaded] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Restore persisted session
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+// Enhanced Live Timer Component with error handling
+function LiveTimer({ startTime, className = "text-lg font-mono" }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [isValid, setIsValid] = useState(true);
+  
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('v2User');
-      if (saved) setUser(JSON.parse(saved));
-    } catch { /* ignore */ }
-  }, []);
-
-  // Load external libraries used for exports (scanner handled by component now)
-  useEffect(() => {
-    const loadLibraries = async () => {
-      const loadScript = (src, id) => new Promise((resolve, reject) => {
-        if (document.getElementById(id)) { resolve(); return; }
-        const script = document.createElement('script');
-        script.src = src; script.id = id; script.onload = resolve; script.onerror = reject;
-        document.body.appendChild(script);
-      });
-      try {
-        await Promise.all([
-          loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf-script'),
-          loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js', 'jspdf-autotable-script'),
-          loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'xlsx-script')
-        ]);
-        setLibrariesLoaded(true);
-      } catch {
-        setError('Failed to load export libraries. Reporting may not work.');
-      }
-    };
-    loadLibraries();
-  }, []);
-
-  // Seed (idempotent) and load users; poll jobs and users periodically
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    let jobsTimer; let usersTimer;
-
-    const normalizeUsers = (arr) => {
-      const map = {};
-      (arr || []).forEach(u => {
-        map[u._id] = {
-          id: u._id,
-          name: u.name,
-          pin: u.pin,
-          role: u.role,
-          uid: u.uid,
-          username: u.username,
-          password: u.password,
-        };
-      });
-      return map;
-    };
-
-    const fetchUsers = async () => {
-      try {
-        const res = await V2.get('/users');
-        setUsers(normalizeUsers(res.data));
-        // If we succeed, clear any previous loading errors
-        if (error.includes('Failed to load users')) setError('');
-      } catch (e) {
-        // If the primary fetch fails, let's diagnose and retry.
-        try {
-          const diagRes = await V2.get('/diag');
-          if (!diagRes.data?.dbBound) {
-            setError('Critical Error: Database not bound. Please check Cloudflare D1 binding.');
-            return;
-          }
-
-          // DB is bound, so let's try to force initialization and retry.
-          await V2.post('/init');
-          const res2 = await V2.get('/users');
-          setUsers(normalizeUsers(res2.data));
-          setError(prev => (prev && prev.includes('Failed to load users') ? '' : prev)); // Clear error on success
-        } catch (retryErr) {
-          const errorMsg = retryErr?.response?.data?.error || retryErr.message;
-          setError(`Failed to load users from server. Reason: ${errorMsg}`);
-          console.error("Failed to fetch users after retry:", retryErr);
-        }
-      }
-    };
-
-  const fetchJobs = async () => {
-      const processJobs = (data) => (data || []).map(j => ({
-        id: j._id,
-        technicianId: j.technicianId,
-        technicianName: j.technicianName,
-        assignedTechnicianIds: j.assignedTechnicianIds || [],
-        techTimers: j.techTimers || {},
-        vin: j.vin,
-        stockNumber: j.stockNumber,
-        vehicleDescription: j.vehicleDescription,
-        serviceType: j.serviceType,
-        startTime: j.startTime ? new Date(j.startTime) : null,
-        endTime: j.endTime ? new Date(j.endTime) : null,
-        duration: j.duration ?? null,
-        status: j.status,
-        date: j.date,
-        notes: j.notes,
-        location: j.location,
-        price: j.price,
-      }));
-
-      try {
-        const res = await V2.get('/jobs');
-        setJobs(processJobs(res.data));
-        setError(prev => (prev && prev.includes('Failed to load jobs') ? '' : prev));
-      } catch (e) {
-        // If the primary fetch fails, assume the DB might not be initialized.
-        // Call the /init endpoint and then retry fetching jobs.
-        try {
-          await V2.post('/init');
-          const res2 = await V2.get('/jobs');
-          setJobs(processJobs(res2.data));
-          setError(prev => (prev && prev.includes('Failed to load jobs') ? '' : prev));
-        } catch (initErr) {
-          const errorMsg = initErr?.response?.data?.error || initErr.message;
-          setError(`Failed to load jobs from server. Reason: ${errorMsg}`);
-          console.error("Failed to fetch jobs after init:", initErr);
-        }
-      }
-    };
-
-    // initial load
-    const initialLoad = async () => {
-      setIsLoading(true);
-      await Promise.all([fetchUsers(), fetchJobs()]);
-      setIsLoading(false);
+    if (!startTime || !DateUtils.isValidDate(startTime)) {
+      setIsValid(false);
+      setElapsed(0);
+      return;
+    }
+    
+    setIsValid(true);
+    const start = new Date(startTime).getTime();
+    const update = () => {
+      const now = Date.now();
+      const diff = Math.max(0, Math.floor((now - start) / 1000));
+      // Cap at 24 hours to prevent display issues
+      setElapsed(Math.min(diff, 24 * 60 * 60));
     };
     
-    initialLoad();
+    update();
+    const interval = setInterval(update, 1000);
+    
+    return () => clearInterval(interval);
+  }, [startTime]);
+  
+  const formatTime = (seconds) => {
+    if (!isValid || seconds === 0) return '--:--:--';
+    const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
+    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  };
+  
+  if (!isValid) {
+    return <span className={className}>--:--:--</span>;
+  }
+  
+  return <span className={className}>{formatTime(elapsed)}</span>;
+}
 
-    // polling
-    jobsTimer = setInterval(fetchJobs, 5000);
-    usersTimer = setInterval(fetchUsers, 15000);
-    return () => { clearInterval(jobsTimer); clearInterval(usersTimer); };
-  }, [error]); // effect intentionally runs only on mount
+// Create API instance with proper base URL
+const V2 = axios.create({
+  baseURL: (process.env.REACT_APP_API_URL ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/v2` : '/api/v2'),
+  timeout: 10000,
+});
 
-  const handleLogin = (loginId, password) => {
-    const potentialUser = Object.values(users).find(u => u.username?.toLowerCase() === loginId.toLowerCase());
-    if (potentialUser && potentialUser.role === 'manager' && potentialUser.password === password) { setUser(potentialUser); setError(''); try { localStorage.setItem('v2User', JSON.stringify(potentialUser)); } catch {}
+// Login Component with gradient/glass theme
+function LoginForm({ onLogin }) {
+  const [employeeId, setEmployeeId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [siteTitle, setSiteTitle] = useState('Cleanup Tracker');
+
+  // Load settings for site title
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await V2.get('/settings');
+        const title = res.data?.siteTitle || 'Cleanup Tracker';
+        setSiteTitle(title);
+      } catch (_) {
+        // ignore, fallback title
+      }
+    })();
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      if (!employeeId) {
+        alert('Enter your employee ID');
+        return;
+      }
+      const response = await V2.post('/auth/login', { employeeId });
+      if (response.data.user) onLogin(response.data.user); else alert('Invalid employee ID');
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || err.message || 'Login failed';
+      alert(errorMsg);
+    } finally {
+      setIsLoading(false);
     }
-    else { setError('Manager login failed.'); }
   };
 
-  const handlePinLogin = (pin) => {
-    const potentialUser = Object.values(users).find(u => u.role === 'detailer' && u.pin === pin);
-    if (potentialUser) { setUser(potentialUser); setError(''); try { localStorage.setItem('v2User', JSON.stringify(potentialUser)); } catch {} }
-    else { setError('Invalid PIN.'); }
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-900 p-4">
+      <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-8 w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">{siteTitle}</h1>
+          <p className="text-gray-300">Mission Ford</p>
+        </div>
+
+        {/* Single login using Employee ID for both roles */}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value.replace(/\D/g,''))}
+              placeholder="Employee ID (e.g., 1709)"
+              className="w-full bg-white/10 text-white placeholder-gray-300 border border-white/20 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+  className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-lg disabled:bg-gray-500"
+          >
+            {isLoading ? 'Signing In...' : 'Sign In'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Main App Component with Mobile-First Design
+function MainApp({ user, onLogout }) {
+  const [view, setView] = useState('dashboard');
+  const [jobs, setJobs] = useState([]);
+  const [users, setUsers] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [settings, setSettings] = useState({ siteTitle: 'Cleanup Tracker' });
+    // no local state needed for inventory warm-up
+
+  // Load data on mount
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+    // One-time inventory warm-up: if first search returns empty and not yet warmed, trigger refresh
+    useEffect(() => {
+      (async () => {
+        try {
+          // quick diag call to see if vehicles exist
+          const d = await V2.get('/diag');
+          if (d.data && typeof d.data.vehicles === 'number' && d.data.vehicles === 0) {
+            await V2.post('/vehicles/refresh');
+          }
+    // no-op
+        } catch (_) {
+          // ignore warm-up errors; user can still search or manual refresh
+    // no-op
+        }
+      })();
+    }, []);
+
+  const loadInitialData = async () => {
+    try {
+      setLoading(true);
+      const [jobsRes, usersRes, settingsRes] = await Promise.all([
+        V2.get('/jobs'),
+        V2.get('/users'),
+        V2.get('/settings')
+      ]);
+      
+      setJobs(jobsRes.data);
+      
+      // Convert users array to object for easy lookup
+      const usersObj = {};
+      usersRes.data.forEach(user => {
+        usersObj[user.id || user._id] = user;
+      });
+      setUsers(usersObj);
+      if (settingsRes && settingsRes.data) {
+        setSettings(settingsRes.data);
+      }
+      
+    } catch (err) {
+      setError('Failed to load data: ' + (err.response?.data?.error || err.message));
+      console.error('Error loading initial data:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleLogout = () => { setUser(null); try { localStorage.removeItem('v2User'); } catch {} };
+  // Allow detailers to freely navigate; no forced redirect.
 
-  if (isLoading && !user) {
+  // Search functionality
+  const handleSearch = async (term) => {
+    if (!term.trim()) return;
+    
+    setIsSearching(true);
+    try {
+      const response = await V2.get(`/vehicles/search?q=${encodeURIComponent(term)}`);
+      setSearchResults(response.data || []);
+      setHasSearched(true);
+    } catch (err) {
+      console.error('Search failed:', err);
+      alert('Search failed: ' + (err.response?.data?.error || err.message));
+      setSearchResults([]);
+      setHasSearched(true);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Debounced auto-search on input change for VIN/Stock
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (!term) {
+      setSearchResults([]);
+      setHasSearched(false);
+      return;
+    }
+    // trigger auto search for 17-char VINs or when 3+ chars entered
+    const shouldSearch = term.length === 17 || term.length >= 3;
+    if (!shouldSearch) return;
+    const controller = new AbortController();
+    const id = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const response = await V2.get(`/vehicles/search?q=${encodeURIComponent(term)}`, { signal: controller.signal });
+        setSearchResults(response.data || []);
+        setHasSearched(true);
+      } catch (err) {
+        if (err.name !== 'CanceledError') {
+          console.error('Search failed:', err);
+          setSearchResults([]);
+          setHasSearched(true);
+        }
+      } finally {
+        setIsSearching(false);
+      }
+    }, 400);
+    return () => {
+      clearTimeout(id);
+      controller.abort();
+    };
+  }, [searchTerm]);
+
+  // Scan success handler
+  const handleScanSuccess = async (vin) => {
+    setShowScanner(false);
+    try {
+      // Try to join an in-progress job by VIN; if none, just run a search to offer starting a job
+      await V2.put(`/vehicles/join-by-vin`, { vin, userId: user.id });
+      await loadInitialData();
+      setSearchTerm(vin);
+      setView('dashboard');
+    } catch (err) {
+      // fallback to search
+      try {
+        const response = await V2.get(`/vehicles/search?q=${encodeURIComponent(vin)}`);
+        setSearchResults(response.data || []);
+        setSearchTerm(vin);
+        setHasSearched(true);
+        setView('jobs');
+      } catch (e2) {
+        alert('VIN lookup failed: ' + (err.response?.data?.error || err.message));
+      }
+    }
+  };
+
+  // Stop work handler
+  const handleStopWork = async () => {
+    try {
+      const activeJob = jobs.find(j => j.status === 'In Progress' && (j.assignedTechnicianIds?.includes(user.id)));
+      if (!activeJob) return;
+      
+      // Stop timer and mark as complete with proper timing
+      await V2.put(`/jobs/${activeJob.id}/complete`, { 
+        userId: user.id,
+        completedAt: new Date().toISOString() 
+      });
+      
+      await loadInitialData(); // Reload data
+      alert('Job completed successfully!');
+    } catch (err) {
+      alert('Failed to complete job: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Delete user handler
+  const deleteUser = async (userId) => {
+    if (!window.confirm('Are you sure you want to delete this detailer?')) return;
+    
+    try {
+      await V2.delete(`/users/${userId}`);
+      await loadInitialData(); // Reload data
+      alert('Detailer deleted successfully');
+    } catch (err) {
+      alert('Failed to delete detailer: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Computed values
+  const activeJobs = useMemo(() => jobs.filter(j => j.status === 'In Progress'), [jobs]);
+  const completedJobs = useMemo(() => jobs.filter(j => j.status === 'Completed'), [jobs]);
+  const userActiveJob = useMemo(() => 
+    activeJobs.find(j => j.assignedTechnicianIds?.includes(user.id)), 
+    [activeJobs, user.id]
+  );
+  const detailers = useMemo(() => 
+    Object.values(users).filter(u => u.role === 'detailer'), 
+    [users]
+  );
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-800 flex flex-col justify-center items-center text-white">
-        <Spinner />
-        <p className="mt-4 text-lg">Loading application...</p>
-        {error && <p className="mt-2 text-red-400 text-sm max-w-md text-center">{error}</p>}
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-red-500/20 backdrop-blur-lg rounded-xl p-6 border border-red-400/30 max-w-md">
+          <h2 className="text-red-100 font-semibold text-lg mb-2">Error</h2>
+          <p className="text-red-200 mb-4">{error}</p>
+          <button 
+            onClick={loadInitialData}
+            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 font-sans">
-      {!user ? (
-        <LoginScreen onLogin={handleLogin} onPinLogin={handlePinLogin} error={error} setError={setError} users={users} />
-      ) : (
-  <MainApp user={user} jobs={jobs} users={users} onLogout={handleLogout} librariesLoaded={librariesLoaded} error={error} />
-      )}
-    </div>
-  );
-}
-
-function LoginScreen({ onLogin, onPinLogin, error, setError, users }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [pin, setPin] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginMode, setLoginMode] = useState('detailer');
-
-  const handleManagerSubmit = (e) => {
-    e.preventDefault(); setIsLoggingIn(true); setError('');
-    setTimeout(() => { onLogin(username, password); setIsLoggingIn(false); }, 500);
-  };
-  const handlePinInput = (digit) => { if (pin.length < 4) setPin(pin + digit); };
-  const handleBackspace = () => setPin(pin.slice(0, -1));
-
-  useEffect(() => {
-    if (pin.length === 4) {
-      setIsLoggingIn(true);
-      setTimeout(() => { onPinLogin(pin); setIsLoggingIn(false); }, 300);
-    }
-  }, [pin, onPinLogin]);
-
-  const detailers = useMemo(() => Object.values(users).filter(u => u.role === 'detailer'), [users]);
-
-  return (
-    <div className="min-h-screen bg-gray-800 flex flex-col justify-center items-center p-4">
-      <h1 className="text-4xl font-bold text-white mb-8">Cleanup Tracker</h1>
-      
-      {error && <div className="bg-red-500 text-white p-3 rounded-md mb-6 max-w-md text-center shadow-lg">{error}</div>}
-
-      <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8">
-        <div className="flex justify-center mb-6 border-b">
-          <button onClick={() => setLoginMode('detailer')} className={`px-4 py-2 text-lg font-semibold ${loginMode === 'detailer' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
-            Technician
-          </button>
-          <button onClick={() => setLoginMode('manager')} className={`px-4 py-2 text-lg font-semibold ${loginMode === 'manager' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
-            Manager
-          </button>
-        </div>
-
-        {loginMode === 'detailer' ? (
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-700 mb-4">Enter PIN</h2>
-            <div className="flex justify-center items-center mb-4">
-              <div className="w-24 h-12 bg-gray-200 rounded-md flex items-center justify-center text-2xl tracking-widest">
-                {isLoggingIn ? <Spinner /> : pin.padEnd(4, '•')}
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
-                <button key={d} onClick={() => handlePinInput(d)} className="p-4 bg-gray-200 rounded-md text-xl font-bold hover:bg-gray-300 transition-colors">
-                  {d}
-                </button>
-              ))}
-              <button onClick={() => setPin('')} className="p-4 bg-red-200 rounded-md text-xl font-bold hover:bg-red-300 transition-colors">
-                Clear
-              </button>
-              <button onClick={() => handlePinInput(0)} className="p-4 bg-gray-200 rounded-md text-xl font-bold hover:bg-gray-300 transition-colors">
-                0
-              </button>
-              <button onClick={handleBackspace} className="p-4 bg-yellow-200 rounded-md text-xl font-bold hover:bg-yellow-300 transition-colors">
-                &larr;
-              </button>
-            </div>
+    <div className="min-h-screen bg-gray-900 flex flex-col">
+      {/* Mobile Header */}
+      <div className="bg-white/10 backdrop-blur-lg border-b border-white/20 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-white font-bold text-lg">{settings.siteTitle || 'Cleanup Tracker'}</h1>
+            <p className="text-gray-300 text-sm">{user.name} • {user.role === 'manager' ? 'Manager' : 'Detailer'}</p>
           </div>
-        ) : (
-          <form onSubmit={handleManagerSubmit}>
-            <h2 className="text-2xl font-bold text-gray-700 mb-4 text-center">Manager Login</h2>
-            <div className="mb-4">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">Username</label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                required
-              />
-            </div>
-            <div className="mb-6">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
-                required
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <button type="submit" disabled={isLoggingIn} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full flex justify-center items-center">
-                {isLoggingIn ? <Spinner /> : 'Sign In'}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-      <div className="mt-8 text-center">
-        <h3 className="text-white text-lg mb-2">Available Technicians</h3>
-        <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-          {detailers.length > 0 ? detailers.map(d => (
-            <div key={d.id} className="bg-gray-700 text-white px-3 py-1 rounded-full text-sm">{d.name}</div>
-          )) : <p className="text-gray-400">Loading technicians...</p>}
+          <button 
+            onClick={onLogout}
+            className="bg-red-500/20 hover:bg-red-500/30 text-red-200 px-3 py-2 rounded-lg text-sm font-medium transition-colors border border-red-400/30"
+          >
+            Sign Out
+          </button>
         </div>
       </div>
-    </div>
-  );
-}
 
-function MainApp({ user, jobs, users, onLogout, librariesLoaded, error }) {
-  const [view, setView] = useState('dashboard'); // dashboard, jobs, users, reports
-  const [showScanner, setShowScanner] = useState(false);
-  const [selectedJob, setSelectedJob] = useState(null);
-
-  const handleScanSuccess = async (vin) => {
-    setShowScanner(false);
-    if (user.role !== 'detailer') {
-      alert(`Scanned VIN: ${vin}. Only technicians can join jobs.`);
-      return;
-    }
-    try {
-      const res = await V2.put('/vehicles/join-by-vin', { vin, userId: user.id });
-      alert(`Successfully joined job for VIN ${vin}. Job ID: ${res.data.jobId}`);
-    } catch (err) {
-      const errorMsg = err?.response?.data?.error || err.message;
-      alert(`Failed to join job for VIN ${vin}. Reason: ${errorMsg}`);
-    }
-  };
-
-  const detailers = useMemo(() => Object.values(users).filter(u => u.role === 'detailer'), [users]);
-  const managers = useMemo(() => Object.values(users).filter(u => u.role === 'manager'), [users]);
-  const activeJobs = useMemo(() => jobs.filter(j => j.status === 'In Progress'), [jobs]);
-  const completedJobs = useMemo(() => jobs.filter(j => j.status === 'Completed'), [jobs]);
-
-  const userActiveJob = useMemo(() => {
-    if (user.role !== 'detailer') return null;
-    return activeJobs.find(j => {
-      const timer = j.techTimers?.[user.id];
-      return timer && timer.startedAt && !timer.endedAt;
-    });
-  }, [activeJobs, user]);
-
-  const handleStopWork = async () => {
-    if (!userActiveJob) return;
-    try {
-      await V2.put(`/jobs/${userActiveJob.id}/stop`, { userId: user.id });
-      alert('You have stopped work on the current job.');
-    } catch (err) {
-      alert('Failed to stop work. Please try again.');
-    }
-  };
-
-  return (
-    <div className="flex h-screen bg-gray-200">
-      {/* Sidebar */}
-      <div className="w-64 bg-gray-800 text-white flex flex-col">
-        <div className="px-8 py-6 border-b border-gray-700">
-          <h2 className="text-2xl font-semibold">Cleanup Tracker</h2>
-          <p className="text-gray-400">Welcome, {user.name}</p>
-        </div>
-        <nav className="flex-1 px-6 py-4">
-          <a href="#/" onClick={() => setView('dashboard')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'dashboard' ? 'bg-gray-700' : ''}`}>Dashboard</a>
-          <a href="#/" onClick={() => setView('jobs')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'jobs' ? 'bg-gray-700' : ''}`}>Jobs</a>
-          {user.role === 'manager' && (
+      {/* Mobile Navigation */}
+      <div className="bg-white/5 backdrop-blur-lg border-b border-white/20 px-4 py-2 overflow-x-auto">
+        <div className="flex space-x-2 min-w-max">
+          <button 
+            onClick={() => setView('dashboard')} 
+            className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+              view === 'dashboard' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            Dashboard
+          </button>
+          
+          {user.role === 'detailer' ? (
             <>
-              <a href="#/" onClick={() => setView('users')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'users' ? 'bg-gray-700' : ''}`}>Users</a>
-              <a href="#/" onClick={() => setView('reports')} className={`block py-2.5 px-4 rounded transition duration-200 hover:bg-gray-700 ${view === 'reports' ? 'bg-gray-700' : ''}`}>Reports</a>
+              <button 
+                onClick={() => setView('jobs')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'jobs' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                New Job
+              </button>
+              <button 
+                onClick={() => setView('me')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'me' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Me
+              </button>
+            </>
+          ) : (
+            <>
+              <button 
+                onClick={() => setView('jobs')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'jobs' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                All Jobs
+              </button>
+              <button 
+                onClick={() => setView('users')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'users' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Team
+              </button>
+              <button 
+                onClick={() => setView('reports')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'reports' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Reports
+              </button>
+              <button 
+                onClick={() => setView('settings')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'settings' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Settings
+              </button>
+              <button 
+                onClick={() => setView('me')} 
+                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+                  view === 'me' ? 'bg-gray-700 text-white' : 'text-gray-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Me
+              </button>
             </>
           )}
-        </nav>
-        <div className="px-6 py-4">
-          <button onClick={onLogout} className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded">
-            Logout
-          </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white shadow-md p-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800 capitalize">{view}</h1>
-          {error && <div className="text-red-500 text-sm font-semibold">{error}</div>}
-          <div>
-            {user.role === 'detailer' && userActiveJob && (
-              <button onClick={handleStopWork} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded mr-4 flex items-center">
-                <span className="mr-2">Stop My Work</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 002 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-              </button>
-            )}
-            {user.role === 'detailer' && (
-              <button onClick={() => setShowScanner(true)} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
-                Scan VIN to Join Job
-              </button>
-            )}
-            {user.role === 'manager' && (
-              <button onClick={() => setView('new-job')} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
-                Create New Job
-              </button>
-            )}
-          </div>
-        </header>
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-200 p-6">
-          {view === 'dashboard' && <Dashboard user={user} jobs={jobs} users={users} activeJobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} />}
-          {view === 'jobs' && <JobsList jobs={jobs} users={users} onJobSelect={setSelectedJob} />}
-          {view === 'users' && user.role === 'manager' && <UsersList users={detailers} managers={managers} />}
-          {view === 'reports' && user.role === 'manager' && <Reports jobs={jobs} users={users} librariesLoaded={librariesLoaded} />}
-          {view === 'new-job' && user.role === 'manager' && <NewJobForm technicians={detailers} onJobCreated={() => setView('jobs')} />}
-        </main>
+      <div className="flex-1 p-4 overflow-y-auto">
+        {/* Detailer Views */}
+        {user.role === 'detailer' && (
+          <>
+            {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} />}
+            {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} />}
+            {view === 'me' && <MySettingsView user={user} />}
+          </>
+        )}        {/* Manager Views */}
+    {user.role === 'manager' && (
+          <>
+            {view === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
+            {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
+            {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
+            {view === 'reports' && <ReportsView jobs={jobs} users={users} />}
+            {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
+      {view === 'me' && <MySettingsView user={user} />}
+          </>
+        )}
       </div>
-
-      {showScanner && <VinScanner onScanSuccess={handleScanSuccess} onCancel={() => setShowScanner(false)} />}
-      {selectedJob && <JobDetailsModal job={selectedJob} users={users} onClose={() => setSelectedJob(null)} />}
     </div>
   );
 }
 
-function Dashboard({ user, jobs, users, activeJobs, completedJobs, userActiveJob }) {
-  const myCompletedToday = useMemo(() => {
-    if (user.role !== 'detailer') return [];
-    const today = new Date().toISOString().slice(0, 10);
-    return completedJobs.filter(j => j.date === today && j.assignedTechnicianIds.includes(user.id));
-  }, [completedJobs, user]);
+// Detailer Dashboard Component
+function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWork, onOpenScanner, onGoToNewJob }) {
+  const myJobsToday = useMemo(() => {
+    return completedJobs.filter(j => {
+      const jobDate = j.date || j.completedAt || j.startTime || j.createdAt;
+      return DateUtils.isToday(jobDate) && j.assignedTechnicianIds?.includes(user.id);
+    }).length;
+  }, [completedJobs, user.id]);
+
+  const [details, setDetails] = useState(null);
+  const [elapsed, setElapsed] = useState(0); // seconds
+  const [showTimeline, setShowTimeline] = useState(false);
+  
+  // Job details modal state
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetails, setJobDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Open job details handler
+  const openJobDetails = async (job) => {
+    setSelectedJob(job);
+    setLoading(true);
+    setError('');
+    setJobDetails(null);
+    try {
+      const jobId = job.id || job._id;
+      if (!jobId) {
+        setError('Job ID not found');
+        return;
+      }
+      const res = await V2.get(`/jobs/${jobId}`);
+      if (res.data) {
+        setJobDetails(res.data);
+      } else {
+        setError('Job details not found');
+      }
+    } catch (err) {
+      console.error('Job details error:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to load job details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeJobDetails = () => {
+    setSelectedJob(null);
+    setJobDetails(null);
+    setError('');
+  };
+
+  // Handle priority change
+  const handlePriorityChange = async (newPriority) => {
+    if (!jobDetails?.job?.id) return;
+    try {
+      await V2.patch(`/jobs/${jobDetails.job.id}`, { priority: newPriority });
+      setJobDetails(prev => ({
+        ...prev,
+        job: { ...prev.job, priority: newPriority }
+      }));
+    } catch (err) {
+      console.error('Failed to update priority:', err);
+    }
+  };
+
+  // Handle sales person change
+  const handleSalesPersonChange = async (newSalesPerson) => {
+    if (!jobDetails?.job?.id) return;
+    try {
+      await V2.patch(`/jobs/${jobDetails.job.id}`, { salesPerson: newSalesPerson });
+      setJobDetails(prev => ({
+        ...prev,
+        job: { ...prev.job, salesPerson: newSalesPerson }
+      }));
+    } catch (err) {
+      console.error('Failed to update sales person:', err);
+    }
+  };
+
+  // Fetch details for active job and run timer
+  useEffect(() => {
+    let interval;
+    const fetchAndStart = async () => {
+      if (!userActiveJob) { 
+        setDetails(null); 
+        setElapsed(0); 
+        return; 
+      }
+      
+      try {
+        const res = await V2.get(`/jobs/${userActiveJob.id}`);
+        setDetails(res.data);
+        
+        // Get start time from multiple possible sources
+        const startTime = userActiveJob.startTime || userActiveJob.startedAt || 
+                         res.data?.job?.startTime || res.data?.job?.startedAt ||
+                         res.data?.job?.createdAt;
+        
+        let startTs;
+        if (startTime && DateUtils.isValidDate(startTime)) {
+          startTs = new Date(startTime).getTime();
+        } else {
+          // Fallback to events
+          const startEvent = (res.data?.events || []).find(e => 
+            e.type?.toLowerCase().includes('start') || e.type?.toLowerCase().includes('created')
+          ) || (res.data?.events || [])[0];
+          
+          if (startEvent && DateUtils.isValidDate(startEvent.timestamp)) {
+            startTs = new Date(startEvent.timestamp).getTime();
+          } else {
+            startTs = Date.now(); // Ultimate fallback
+          }
+        }
+        
+        const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startTs) / 1000)));
+        update();
+        interval = setInterval(update, 1000);
+      } catch (err) {
+        console.error('Failed to fetch job details:', err);
+        // Fallback timer using job start time
+        if (userActiveJob.startTime && DateUtils.isValidDate(userActiveJob.startTime)) {
+          const startTs = new Date(userActiveJob.startTime).getTime();
+          const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startTs) / 1000)));
+          update();
+          interval = setInterval(update, 1000);
+        }
+      }
+    };
+    fetchAndStart();
+    return () => { if (interval) clearInterval(interval); };
+  }, [userActiveJob]);
+
+  const fmt = (s) => {
+    const h = Math.floor(s / 3600).toString().padStart(2,'0');
+    const m = Math.floor((s % 3600) / 60).toString().padStart(2,'0');
+    const sec = (s % 60).toString().padStart(2,'0');
+    return `${h}:${m}:${sec}`;
+  };
 
   return (
-    <div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-gray-500 text-sm font-medium">Total Jobs Today</h3>
-          <p className="text-3xl font-bold text-gray-800">{jobs.filter(j => j.date === new Date().toISOString().slice(0, 10)).length}</p>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-gray-500 text-sm font-medium">Active Jobs</h3>
-          <p className="text-3xl font-bold text-gray-800">{activeJobs.length}</p>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-gray-500 text-sm font-medium">Completed Today</h3>
-          <p className="text-3xl font-bold text-gray-800">{completedJobs.filter(j => j.date === new Date().toISOString().slice(0, 10)).length}</p>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-gray-500 text-sm font-medium">Active Technicians</h3>
-          <p className="text-3xl font-bold text-gray-800">{Object.keys(users).filter(id => users[id].role === 'detailer').length}</p>
-        </div>
-      </div>
-
-      {user.role === 'detailer' && (
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">My Status</h2>
-          {userActiveJob ? (
-            <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4" role="alert">
-              <p className="font-bold">You are currently working on a job:</p>
-              <p>{userActiveJob.vehicleDescription} ({userActiveJob.vin})</p>
-              <p>Started at: {formatTime(userActiveJob.startTime)}</p>
-            </div>
-          ) : (
-            <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4" role="alert">
-              <p className="font-bold">You are not currently on a job.</p>
-              <p>Scan a VIN to start a new job.</p>
+    <div className="space-y-4">
+      {/* Current Job Status */}
+      {userActiveJob ? (
+        <div className="bg-yellow-500/20 backdrop-blur-lg rounded-xl p-6 border border-yellow-400/30">
+          <h3 className="text-yellow-100 font-semibold text-lg mb-3">Current Job</h3>
+          <div className="text-white">
+            <p className="text-xl font-bold">{userActiveJob.vehicleDescription}</p>
+            <p className="text-yellow-200">Service: {userActiveJob.serviceType}</p>
+            <p className="text-yellow-200">Stock #: {userActiveJob.stockNumber}</p>
+            {details && (
+              <>
+                <p className="text-yellow-200">
+                  Started: {DateUtils.formatDate(
+                    (details.job?.startedAt) || (details.events?.[0]?.timestamp) || Date.now(),
+                    { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+                  )}
+                </p>
+                <p className="text-yellow-100 text-2xl font-mono mt-2">{fmt(elapsed)}</p>
+              </>
+            )}
+          </div>
+          <button 
+            onClick={onStopWork}
+            className="mt-4 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+          >
+            Complete Job
+          </button>
+          {details && (
+            <div className="mt-4">
+              <button onClick={() => setShowTimeline(!showTimeline)} className="text-yellow-200 underline text-sm">{showTimeline ? 'Hide' : 'Show'} Timeline</button>
+              {showTimeline && (
+                <ul className="mt-2 space-y-1 max-h-40 overflow-auto pr-2">
+                  {(details.events || []).map((ev, idx) => (
+                    <li key={idx} className="text-yellow-100 text-sm">
+                      <span className="font-medium">{ev.type}</span> — {DateUtils.formatDate(ev.timestamp)} {ev.userName ? `• ${ev.userName}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>
+      ) : (
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+          <h3 className="text-white font-semibold text-lg mb-3">Start a New Job</h3>
+          <p className="text-gray-300 mb-4">Scan a VIN or search by VIN/Stock to begin.</p>
+            <div className="mb-4">
+              <button
+                onClick={async () => { try { await V2.post('/vehicles/refresh'); alert('Inventory refreshed. Try your search again.'); } catch (e) { alert('Refresh failed: ' + (e.response?.data?.error || e.message)); } }}
+                className="px-3 py-2 rounded bg-white/10 hover:bg-white/20 text-white text-sm backdrop-blur border border-white/20"
+              >
+                Refresh Inventory
+              </button>
+            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button 
+              onClick={onOpenScanner}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+            >
+              Scan VIN
+            </button>
+            <button 
+              onClick={onGoToNewJob}
+              className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+            >
+              Search Vehicle
+            </button>
+          </div>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Active Jobs</h2>
-          <div className="overflow-y-auto max-h-96">
-            {activeJobs.length > 0 ? (
-              activeJobs.map(job => <JobCard key={job.id} job={job} users={users} />)
-            ) : (
-              <p className="text-gray-500">No active jobs.</p>
-            )}
-          </div>
+      {/* Today's Stats */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Completed Today</h4>
+          <p className="text-3xl font-bold text-green-400">{myJobsToday}</p>
+          <p className="text-gray-400 text-xs mt-1">Great work!</p>
         </div>
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">My Completed Jobs Today</h2>
-          <div className="overflow-y-auto max-h-96">
-            {myCompletedToday.length > 0 ? (
-              myCompletedToday.map(job => <JobCard key={job.id} job={job} users={users} />)
-            ) : (
-              <p className="text-gray-500">You haven't completed any jobs today.</p>
-            )}
-          </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Active Job</h4>
+          <p className="text-3xl font-bold text-yellow-400">{userActiveJob ? 1 : 0}</p>
+          <p className="text-gray-400 text-xs mt-1">{userActiveJob ? 'Keep going!' : 'Ready to start'}</p>
         </div>
       </div>
-    </div>
-  );
-}
 
-function JobCard({ job, users }) {
-  const assignedTechs = job.assignedTechnicianIds.map(id => users[id]?.name || 'Unknown').join(', ');
-  return (
-    <div className="border-b py-3">
-      <p className="font-semibold text-gray-800">{job.vehicleDescription}</p>
-      <p className="text-sm text-gray-600">VIN: {job.vin} | Stock: {job.stockNumber}</p>
-      <p className="text-sm text-gray-600">Service: {job.serviceType}</p>
-      <p className="text-sm text-gray-600">Assigned: {assignedTechs}</p>
-      <p className="text-sm text-gray-500">Started: {formatTime(job.startTime)}</p>
-    </div>
-  );
-}
-
-function JobsList({ jobs, users, onJobSelect }) {
-  const [filter, setFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const filteredJobs = useMemo(() => {
-    return jobs
-      .filter(job => {
-        if (filter === 'all') return true;
-        return job.status.toLowerCase().replace(' ', '-') === filter;
-      })
-      .filter(job => {
-        if (!searchTerm) return true;
-        const term = searchTerm.toLowerCase();
-        return (
-          job.vin?.toLowerCase().includes(term) ||
-          job.stockNumber?.toLowerCase().includes(term) ||
-          job.vehicleDescription?.toLowerCase().includes(term) ||
-          job.serviceType?.toLowerCase().includes(term) ||
-          (job.assignedTechnicianIds.map(id => users[id]?.name).join(' ').toLowerCase().includes(term))
-        );
-      });
-  }, [jobs, users, filter, searchTerm]);
-
-  return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex space-x-2">
-          <button onClick={() => setFilter('all')} className={`px-3 py-1 rounded-full text-sm ${filter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-300'}`}>All</button>
-          <button onClick={() => setFilter('in-progress')} className={`px-3 py-1 rounded-full text-sm ${filter === 'in-progress' ? 'bg-yellow-500 text-white' : 'bg-gray-300'}`}>In Progress</button>
-          <button onClick={() => setFilter('completed')} className={`px-3 py-1 rounded-full text-sm ${filter === 'completed' ? 'bg-green-500 text-white' : 'bg-gray-300'}`}>Completed</button>
-        </div>
-        <input
-          type="text"
-          placeholder="Search jobs..."
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          className="border rounded px-3 py-1"
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="p-3">Vehicle</th>
-              <th className="p-3">VIN/Stock</th>
-              <th className="p-3">Service</th>
-              <th className="p-3">Technicians</th>
-              <th className="p-3">Start Time</th>
-              <th className="p-3">End Time</th>
-              <th className="p-3">Duration</th>
-              <th className="p-3">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredJobs.map(job => (
-              <tr key={job.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => onJobSelect(job)}>
-                <td className="p-3">{job.vehicleDescription}</td>
-                <td className="p-3">{job.vin}<br/>{job.stockNumber}</td>
-                <td className="p-3">{job.serviceType}</td>
-                <td className="p-3">{job.assignedTechnicianIds.map(id => users[id]?.name || 'N/A').join(', ')}</td>
-                <td className="p-3">{formatTime(job.startTime)}</td>
-                <td className="p-3">{formatTime(job.endTime)}</td>
-                <td className="p-3">{formatDuration(job.duration)}</td>
-                <td className="p-3">
-                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                    job.status === 'Completed' ? 'bg-green-200 text-green-800' :
-                    job.status === 'In Progress' ? 'bg-yellow-200 text-yellow-800' : 'bg-gray-200 text-gray-800'
-                  }`}>
-                    {job.status}
-                  </span>
-                </td>
-              </tr>
+      {/* My Job History */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">My Recent Jobs</h3>
+        <div className="space-y-3 max-h-80 overflow-y-auto">
+          {completedJobs
+            .filter(job => job.assignedTechnicianIds?.includes(user.id))
+            .slice(0, 10)
+            .map(job => (
+              <button
+                key={job.id}
+                onClick={() => openJobDetails(job)}
+                className="w-full text-left bg-white/5 rounded-lg p-4 border border-white/10 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-white font-medium text-lg">{job.vehicleDescription}</p>
+                      {job.color && (
+                        <span className="px-2 py-1 bg-white/10 text-white text-xs rounded-full font-medium">
+                          {job.color}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+                      <p className="text-gray-300">Stock: <span className="text-white font-medium">{job.stockNumber}</span></p>
+                      <p className="text-gray-300">VIN: <span className="font-mono text-white text-xs">{job.vin?.slice(-6) || 'N/A'}</span></p>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm mb-2">
+                      <span className="text-blue-300 font-medium">{job.serviceType}</span>
+                      {job.priority && job.priority !== 'Normal' && (
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          job.priority === 'Urgent' ? 'bg-red-500/20 text-red-400' :
+                          job.priority === 'High' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {job.priority}
+                        </span>
+                      )}
+                    </div>
+                    {job.salesPerson && (
+                      <p className="text-blue-300 text-sm mb-1">Sales: {job.salesPerson}</p>
+                    )}
+                    <div className="text-xs text-gray-400">
+                      {job.startTime && (
+                        <p>Started: {DateUtils.formatDateTime(job.startTime)}</p>
+                      )}
+                      {job.completedAt && (
+                        <p>Completed: {DateUtils.formatDateTime(job.completedAt)}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right ml-4">
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      job.status === 'In Progress' 
+                        ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-400/30' 
+                        : 'bg-green-500/20 text-green-400 border border-green-400/30'
+                    }`}>
+                      {job.status}
+                    </span>
+                    {job.completedAt && (job.startTime || job.startedAt) && (
+                      <div className="mt-2">
+                        <p className="text-green-400 font-bold text-lg">
+                          {DateUtils.formatDuration(
+                            DateUtils.calculateDuration(
+                              job.startTime || job.startedAt, 
+                              job.completedAt
+                            )
+                          )}
+                        </p>
+                        <p className="text-gray-400 text-xs">Total Time</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
             ))}
-          </tbody>
-        </table>
+          {completedJobs.filter(job => job.assignedTechnicianIds?.includes(user.id)).length === 0 && (
+            <p className="text-gray-400 text-center py-4">No jobs completed yet</p>
+          )}
+        </div>
+      </div>
+
+      {/* Job Details Modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 w-full max-w-3xl border border-white/20 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h4 className="text-white font-semibold text-xl">Job Details</h4>
+              <button onClick={closeJobDetails} className="text-white/80 hover:text-white text-2xl">✕</button>
+            </div>
+            
+            {loading && <p className="text-gray-300">Loading job details…</p>}
+            {error && <p className="text-red-300">{error}</p>}
+            
+            {jobDetails && (
+              <div className="space-y-6">
+                {/* Vehicle & Job Information */}
+                <div className="bg-white/5 rounded-lg p-6 border border-white/10">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <h5 className="text-white font-medium mb-3">Vehicle Information</h5>
+                      <p className="text-white font-medium text-xl mb-2">{selectedJob.vehicleDescription}</p>
+                      <div className="space-y-2">
+                        <p className="text-gray-300 text-sm">VIN: <span className="font-mono text-white">{jobDetails.job?.vin}</span></p>
+                        <p className="text-gray-300 text-sm">Stock Number: <span className="text-white">{jobDetails.job?.stockNumber}</span></p>
+                        {jobDetails.job?.color && (
+                          <p className="text-gray-300 text-sm">Color: <span className="text-white font-medium">{jobDetails.job.color}</span></p>
+                        )}
+                        <p className="text-gray-300 text-sm">Service Type: <span className="text-blue-300 font-medium">{jobDetails.job?.serviceType}</span></p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-300 text-sm">Priority:</span>
+                          <select 
+                            value={jobDetails.job?.priority || 'Normal'} 
+                            onChange={(e) => handlePriorityChange(e.target.value)}
+                            className="bg-white/10 text-white border border-white/20 rounded px-2 py-1 text-sm"
+                          >
+                            <option value="Low" className="bg-gray-800">Low</option>
+                            <option value="Normal" className="bg-gray-800">Normal</option>
+                            <option value="High" className="bg-gray-800">High</option>
+                            <option value="Urgent" className="bg-gray-800">Urgent</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-300 text-sm">Sales Person:</span>
+                          <input 
+                            type="text"
+                            value={jobDetails.job?.salesPerson || ''}
+                            onChange={(e) => handleSalesPersonChange(e.target.value)}
+                            placeholder="Enter sales person name"
+                            className="bg-white/10 text-white border border-white/20 rounded px-2 py-1 text-sm flex-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <h5 className="text-white font-medium mb-3">My Performance</h5>
+                      <p className={`text-lg font-medium mb-2 ${
+                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-400' : 'text-green-400'
+                      }`}>
+                        Status: {jobDetails.job?.status}
+                      </p>
+                      {jobDetails.job?.startTime && (
+                        <div className="space-y-2">
+                          <p className="text-gray-300 text-sm">
+                            Started: {new Date(jobDetails.job.startTime).toLocaleString()}
+                          </p>
+                          {jobDetails.job?.status === 'In Progress' && (
+                            <div>
+                              <p className="text-gray-300 text-sm">Working for:</p>
+                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-300 font-mono text-2xl" />
+                            </div>
+                          )}
+                          {jobDetails.job?.completedAt && (
+                            <div>
+                              <p className="text-gray-300 text-sm">
+                                Completed: {DateUtils.formatDate(jobDetails.job.completedAt)}
+                              </p>
+                              <p className="text-green-300 text-lg font-medium">
+                                Total Time: {DateUtils.formatDuration(
+                                  DateUtils.calculateDuration(jobDetails.job.startTime, jobDetails.job.completedAt)
+                                )}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Job Timeline */}
+                <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                  <h5 className="text-white font-medium mb-3">Job Timeline</h5>
+                  <ul className="space-y-3 max-h-48 overflow-auto pr-2">
+                    {/* Job Started Event */}
+                    {jobDetails.job?.startTime && (
+                      <li className="text-gray-300 text-sm border-l-2 border-green-400 pl-3">
+                        <span className="text-green-400 font-medium">Job Started</span>
+                        <span className="text-gray-400 block text-xs mt-1">
+                          {DateUtils.formatDateTime(jobDetails.job.startTime)}
+                          {jobDetails.job?.technicianName && ` • ${jobDetails.job.technicianName}`}
+                        </span>
+                      </li>
+                    )}
+                    
+                    {/* Job Completed Event */}
+                    {jobDetails.job?.completedAt && (
+                      <li className="text-gray-300 text-sm border-l-2 border-blue-400 pl-3">
+                        <span className="text-blue-400 font-medium">Job Completed</span>
+                        <span className="text-gray-400 block text-xs mt-1">
+                          {DateUtils.formatDateTime(jobDetails.job.completedAt)}
+                          {jobDetails.job?.duration && ` • Duration: ${DateUtils.formatDuration(jobDetails.job.duration)}`}
+                        </span>
+                      </li>
+                    )}
+                    
+                    {/* Other Timeline Events */}
+                    {(jobDetails.events || []).map((ev, idx) => {
+                      const validDate = DateUtils.getValidDate(ev.timestamp || ev.at);
+                      return (
+                        <li key={idx} className="text-gray-300 text-sm border-l-2 border-gray-500 pl-3">
+                          <span className="text-white/90 font-medium">
+                            {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
+                          </span>
+                          <span className="text-gray-400 block text-xs mt-1">
+                            {validDate ? DateUtils.formatDateTime(validDate) : 'Invalid Date'}
+                            {ev.userName && ` • ${ev.userName}`}
+                          </span>
+                        </li>
+                      );
+                    })}
+                    
+                    {(!jobDetails.job?.startTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
+                      <li className="text-gray-400 text-sm">No timeline events recorded</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Detailer New Job Component
+function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm, setSearchTerm, showScanner, setShowScanner, onScanSuccess, hasSearched, onJobCreated }) {
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [serviceType, setServiceType] = useState('Detail');
+  const [salesPerson, setSalesPerson] = useState('');
+
+  const serviceTypes = ['Detail', 'Delivery', 'Rewash', 'Lot Car', 'FCTP', 'Cleanup', 'Showroom'];
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    onSearch(searchTerm);
+  };
+
+  // Auto-select when exactly one result
+  useEffect(() => {
+    if (searchResults && searchResults.length === 1) {
+      setSelectedVehicle(searchResults[0]);
+    }
+  }, [searchResults]);
+
+  const handleCreateJob = async () => {
+    if (!selectedVehicle) return;
+    
+    try {
+      const now = new Date();
+      const newJob = {
+        technicianId: user.id,
+        technicianName: user.name,
+        vin: selectedVehicle.vin,
+        stockNumber: selectedVehicle.stockNumber,
+        vehicleDescription: `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`,
+        serviceType: serviceType,
+        salesPerson: salesPerson.trim() || '',
+        assignedTechnicianIds: [user.id],
+        status: 'In Progress',
+        date: DateUtils.getLocalDateString(now),
+        startTime: now.toISOString(),
+        startedAt: now.toISOString(),
+        createdAt: now.toISOString(),
+        timestamp: now.toISOString()
+      };
+      
+      await V2.post('/jobs', newJob);
+      alert('Job started successfully!');
+      setSelectedVehicle(null);
+      setSearchTerm('');
+      setSalesPerson('');
+      
+      // Refresh job data and navigate to dashboard
+      if (onJobCreated) {
+        await onJobCreated();
+      }
+    } catch (err) {
+      alert('Failed to start job: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Scan Option */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Scan VIN Barcode</h3>
+        <button 
+          onClick={() => setShowScanner(true)}
+          className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+          <span>Scan VIN</span>
+        </button>
+      </div>
+
+      {/* Search Option */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Search Vehicle</h3>
+        <form onSubmit={handleSearchSubmit} className="space-y-4">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Enter VIN or Stock Number"
+            className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="flex items-center gap-2">
+            <button 
+              type="submit"
+              disabled={isSearching || !searchTerm.trim()}
+              className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500"
+            >
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => { setSearchTerm(''); }}
+                className="px-4 py-3 rounded-lg border border-white/20 text-white bg-white/10 hover:bg-white/20"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </form>
+
+        {/* Search Results */}
+        {hasSearched && searchResults.length === 0 && !isSearching && (
+          <p className="mt-4 text-gray-300">No vehicles found. Check VIN/Stock and try again.</p>
+        )}
+        {searchResults.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <h4 className="text-white font-medium">Search Results</h4>
+            {searchResults.map((vehicle, index) => (
+              <div 
+                key={index}
+                className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                  selectedVehicle?.vin === vehicle.vin 
+                    ? 'bg-blue-500/30 border border-blue-400' 
+                    : 'bg-white/5 hover:bg-white/10 border border-white/10'
+                }`}
+                onClick={() => setSelectedVehicle(vehicle)}
+              >
+                <p className="text-white font-medium">{vehicle.year} {vehicle.make} {vehicle.model}</p>
+                <p className="text-gray-300 text-sm">VIN: {vehicle.vin}</p>
+                <p className="text-gray-300 text-sm">Stock: {vehicle.stockNumber}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Selected Vehicle & Job Creation */}
+        {selectedVehicle && (
+          <div className="mt-6 bg-blue-500/20 backdrop-blur-lg rounded-lg p-4 border border-blue-400/30">
+            <h4 className="text-blue-100 font-semibold mb-3">Selected Vehicle</h4>
+            <p className="text-white text-lg font-bold">{selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</p>
+            <p className="text-blue-200">Stock: {selectedVehicle.stockNumber}</p>
+            <p className="text-blue-200">VIN: {selectedVehicle.vin}</p>
+            
+            <div className="mt-4">
+              <label className="block text-blue-100 font-medium mb-2">Service Type</label>
+              <select 
+                value={serviceType}
+                onChange={(e) => setServiceType(e.target.value)}
+                className="w-full bg-white/10 text-white border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {serviceTypes.map(type => (
+                  <option key={type} value={type} className="bg-gray-800">{type}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="mt-4">
+              <label className="block text-blue-100 font-medium mb-2">Sales Person (Optional)</label>
+              <input
+                type="text"
+                value={salesPerson}
+                onChange={(e) => setSalesPerson(e.target.value)}
+                placeholder="Enter sales person name"
+                className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <button 
+              onClick={handleCreateJob}
+              className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+            >
+              Start Job
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Scanner Modal */}
+      {showScanner && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 w-full max-w-md border border-white/20">
+            <h3 className="text-white font-semibold text-lg mb-4">Scan VIN Barcode</h3>
+            <VinScanner onSuccess={onScanSuccess} onClose={() => setShowScanner(false)} />
+            <button 
+              onClick={() => setShowScanner(false)}
+              className="w-full mt-4 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Manager Dashboard Component with Auto-refresh
+function ManagerDashboard({ jobs, users, currentUser, onRefresh }) {
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetails, setJobDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [dateFilter, setDateFilter] = useState('today');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Auto-refresh every 30 seconds if enabled and no modal is open
+  useEffect(() => {
+    if (!autoRefresh || selectedJob) return; // Pause when modal is open
+    const interval = setInterval(() => {
+      onRefresh?.();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, onRefresh, selectedJob]);
+
+  // Filter jobs based on date range using Eastern Time
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      // Check multiple possible date fields for comprehensive coverage
+      const possibleDates = [
+        job.date,
+        job.startTime,
+        job.startedAt,
+        job.createdAt,
+        job.timestamp,
+        job.completedAt
+      ].filter(d => d && DateUtils.isValidDate(d));
+      
+      if (possibleDates.length === 0) return dateFilter === 'all';
+      
+      // Use the most relevant date (prefer start times, then creation times)
+      const jobDate = job.startTime || job.startedAt || job.createdAt || 
+                     job.timestamp || job.date || possibleDates[0];
+      
+      switch (dateFilter) {
+        case 'today':
+          return DateUtils.isToday(jobDate);
+        case 'week':
+          return DateUtils.isThisWeek(jobDate);
+        case 'month':
+          return DateUtils.isThisMonth(jobDate);
+        case 'all':
+        default:
+          return true;
+      }
+    });
+  }, [jobs, dateFilter]);
+
+  // Open job details handler
+  const openJobDetails = async (job) => {
+    setSelectedJob(job);
+    setLoading(true);
+    setError('');
+    setJobDetails(null);
+    try {
+      const jobId = job.id || job._id;
+      if (!jobId) {
+        setError('Job ID not found');
+        return;
+      }
+      const res = await V2.get(`/jobs/${jobId}`);
+      if (res.data) {
+        setJobDetails(res.data);
+      } else {
+        setError('Job details not found');
+      }
+    } catch (err) {
+      console.error('Job details error:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to load job details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeJobDetails = () => {
+    setSelectedJob(null);
+    setJobDetails(null);
+    setError('');
+  };
+  // Calculate statistics with better validation
+  const stats = useMemo(() => {
+    const todayJobs = jobs.filter(job => {
+      const jobDate = job.date || job.startTime || job.createdAt || job.timestamp;
+      return DateUtils.isToday(jobDate);
+    });
+    
+    const activeJobs = filteredJobs.filter(j => j.status === 'In Progress');
+    const completedJobs = filteredJobs.filter(j => j.status === 'Completed');
+    const detailers = Object.values(users || {}).filter(u => u.role === 'detailer');
+    
+    return {
+      totalFiltered: filteredJobs.length,
+      totalToday: todayJobs.length,
+      active: activeJobs.length,
+      completed: completedJobs.length,
+      detailers: detailers.length
+    };
+  }, [filteredJobs, jobs, users]);
+
+  return (
+    <div className="space-y-6">
+      {/* Date Filter & Controls */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <h4 className="text-white font-medium">Dashboard View</h4>
+            <button
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              className={`px-2 py-1 text-xs rounded-lg transition-colors ${
+                autoRefresh 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-white/10 text-gray-300 hover:bg-white/20'
+              }`}
+            >
+              Auto-refresh: {autoRefresh ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={() => onRefresh?.()}
+              className="px-2 py-1 text-xs rounded-lg bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white"
+            >
+              🔄 Refresh
+            </button>
+          </div>
+          <div className="flex gap-2">
+            {[
+              { key: 'today', label: 'Today' },
+              { key: 'week', label: 'This Week' },
+              { key: 'month', label: 'This Month' },
+              { key: 'all', label: 'All Time' }
+            ].map(option => (
+              <button
+                key={option.key}
+                onClick={() => setDateFilter(option.key)}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                  dateFilter === option.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-2 flex justify-between items-center">
+          <span className="text-sm text-gray-400">
+            Showing {stats.totalFiltered} jobs for {dateFilter === 'all' ? 'all time' : dateFilter}
+          </span>
+          <span className="text-xs text-gray-500">
+            Last updated: {DateUtils.formatDate(new Date(), { 
+              hour: '2-digit', 
+              minute: '2-digit', 
+              second: '2-digit' 
+            })}
+          </span>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Filtered Jobs</h4>
+          <p className="text-3xl font-bold text-white">{stats.totalFiltered}</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Active Jobs</h4>
+          <p className="text-3xl font-bold text-yellow-400">{stats.active}</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Completed</h4>
+          <p className="text-3xl font-bold text-green-400">{stats.completed}</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Detailers</h4>
+          <p className="text-3xl font-bold text-blue-400">{stats.detailers}</p>
+        </div>
+      </div>
+
+      {/* Active Jobs with Live Timers */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Jobs In Progress</h3>
+        <div className="space-y-3">
+          {filteredJobs.filter(job => job.status === 'In Progress').map(job => (
+            <button
+              key={job.id}
+              onClick={() => openJobDetails(job)}
+              className="w-full text-left bg-yellow-500/10 rounded-lg p-4 border border-yellow-400/20 hover:bg-yellow-500/20 transition-colors"
+            >
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <p className="text-white font-medium">{job.vehicleDescription}</p>
+                  <p className="text-gray-300 text-sm">Stock: {job.stockNumber} • VIN: {job.vin}</p>
+                  <p className="text-gray-300 text-sm">{job.technicianName} • {job.serviceType}</p>
+                  {job.salesPerson && (
+                    <p className="text-blue-300 text-sm">Sales: {job.salesPerson}</p>
+                  )}
+                  <p className="text-gray-400 text-xs mt-1">Click for details</p>
+                </div>
+                <div className="text-right">
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-400/30">
+                    In Progress
+                  </span>
+                  {(job.startTime || job.startedAt) && (
+                    <div className="mt-2">
+                      <LiveTimer startTime={job.startTime || job.startedAt} className="text-yellow-300 font-mono text-lg" />
+                      <p className="text-gray-400 text-xs">
+                        Started: {DateUtils.formatDate(job.startTime || job.startedAt, { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+          {filteredJobs.filter(job => job.status === 'In Progress').length === 0 && (
+            <p className="text-gray-400 text-center py-4">No jobs in progress</p>
+          )}
+        </div>
+      </div>
+
+      {/* Recent Completed Jobs */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Recent Completed Jobs</h3>
+        <div className="space-y-3">
+          {filteredJobs.filter(job => job.status === 'Completed').slice(0, 5).map(job => (
+            <button
+              key={job.id}
+              onClick={() => openJobDetails(job)}
+              className="w-full text-left bg-white/5 rounded-lg p-3 border border-white/10 hover:bg-white/10 transition-colors"
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-white font-medium">{job.vehicleDescription}</p>
+                  <p className="text-gray-300 text-sm">Stock: {job.stockNumber}</p>
+                  <p className="text-gray-300 text-sm">{job.technicianName} • {job.serviceType}</p>
+                  {job.salesPerson && (
+                    <p className="text-blue-300 text-sm">Sales: {job.salesPerson}</p>
+                  )}
+                  <p className="text-gray-400 text-xs mt-1">Click for details</p>
+                </div>
+                <div className="text-right">
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400 border border-green-400/30">
+                    Completed
+                  </span>
+                  {job.completedAt && (
+                    <div className="text-xs mt-1">
+                      <p className="text-gray-400">
+                        Completed: {DateUtils.formatDate(job.completedAt, { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </p>
+                      {(job.startTime || job.startedAt) && (
+                        <p className="text-gray-500">
+                          Duration: {DateUtils.formatDuration(
+                            DateUtils.calculateDuration(
+                              job.startTime || job.startedAt, 
+                              job.completedAt
+                            )
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Job Details Modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 w-full max-w-4xl border border-white/20 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h4 className="text-white font-semibold text-xl">Job Details</h4>
+              <button onClick={closeJobDetails} className="text-white/80 hover:text-white text-2xl">✕</button>
+            </div>
+            
+            {loading && <p className="text-gray-300">Loading job details…</p>}
+            {error && <p className="text-red-300">{error}</p>}
+            
+            {jobDetails && (
+              <div className="space-y-6">
+                {/* Vehicle & Job Information */}
+                <div className="bg-white/5 rounded-lg p-6 border border-white/10">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <h5 className="text-white font-medium mb-3">Vehicle Information</h5>
+                      <p className="text-white font-medium text-xl mb-2">{selectedJob.vehicleDescription}</p>
+                      <div className="space-y-1">
+                        <p className="text-gray-300 text-sm">VIN: {jobDetails.job?.vin}</p>
+                        <p className="text-gray-300 text-sm">Stock Number: {jobDetails.job?.stockNumber}</p>
+                        <p className="text-gray-300 text-sm">Service Type: {jobDetails.job?.serviceType}</p>
+                        {jobDetails.job?.salesPerson && (
+                          <p className="text-blue-300 text-sm">Sales Person: {jobDetails.job.salesPerson}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <h5 className="text-white font-medium mb-3">Job Status & Timing</h5>
+                      <p className={`text-lg font-medium mb-2 ${
+                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-400' : 'text-green-400'
+                      }`}>
+                        Status: {jobDetails.job?.status}
+                      </p>
+                      {jobDetails.job?.startTime && (
+                        <div className="space-y-2">
+                          <p className="text-gray-300 text-sm">
+                            Started: {new Date(jobDetails.job.startTime).toLocaleString()}
+                          </p>
+                          {jobDetails.job?.status === 'In Progress' && (
+                            <div>
+                              <p className="text-gray-300 text-sm">Current Duration:</p>
+                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-300 font-mono text-2xl" />
+                            </div>
+                          )}
+                          {jobDetails.job?.completedAt && (
+                            <div>
+                              <p className="text-gray-300 text-sm">
+                                Completed: {new Date(jobDetails.job.completedAt).toLocaleString()}
+                              </p>
+                              <p className="text-gray-300 text-sm">
+                                Total Duration: {Math.floor((new Date(jobDetails.job.completedAt) - new Date(jobDetails.job.startTime)) / (1000 * 60))} minutes
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Management Actions */}
+                  {jobDetails.job?.status === 'In Progress' && (
+                    <div className="flex gap-2 mt-4 pt-4 border-t border-white/10">
+                      <button
+                        onClick={async () => { 
+                          try { 
+                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                            if (!jobId) return alert('Job ID not found');
+                            await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id }); 
+                            await onRefresh?.(); 
+                            closeJobDetails(); 
+                            alert('Timer stopped');
+                          } catch (e) { 
+                            alert('Stop failed: ' + (e.response?.data?.error || e.message)); 
+                          } 
+                        }}
+                        className="px-4 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-white text-sm"
+                      >
+                        Stop Timer
+                      </button>
+                      <button
+                        onClick={async () => { 
+                          try { 
+                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                            if (!jobId) return alert('Job ID not found');
+                            await V2.put(`/jobs/${jobId}/complete`, { 
+                              userId: currentUser?.id,
+                              completedAt: new Date().toISOString()
+                            }); 
+                            await onRefresh?.(); 
+                            closeJobDetails(); 
+                            alert('Job marked complete');
+                          } catch (e) { 
+                            alert('Complete failed: ' + (e.response?.data?.error || e.message)); 
+                          } 
+                        }}
+                        className="px-4 py-2 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
+                      >
+                        Mark Complete
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Enhanced Details & Timeline */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                    <h5 className="text-white font-medium mb-3">Job Details</h5>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Technician:</span>
+                        <span className="text-gray-300 text-sm">{selectedJob.technicianName || 'Unknown'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Priority:</span>
+                        <span className="text-gray-300 text-sm">{jobDetails.job?.priority || 'Normal'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Location:</span>
+                        <span className="text-gray-300 text-sm">{jobDetails.job?.location || 'Detail Bay'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 text-sm">Vehicle Type:</span>
+                        <span className="text-gray-300 text-sm">
+                          {selectedJob.vehicleDescription?.toLowerCase().includes('new') ? 'New' : 'Used'}
+                        </span>
+                      </div>
+                      {jobDetails.job?.notes && (
+                        <div>
+                          <span className="text-gray-400 text-sm block">Notes:</span>
+                          <span className="text-gray-300 text-sm">{jobDetails.job.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                    <h5 className="text-white font-medium mb-3">Job Timeline</h5>
+                    <ul className="space-y-2 max-h-48 overflow-auto pr-2">
+                      {(jobDetails.events || []).filter(ev => ev && ev.type).map((ev, idx) => (
+                        <li key={idx} className="text-gray-300 text-sm">
+                          <span className="text-white/90 font-medium">{ev.type}</span>
+                          <span className="text-gray-400 block text-xs">
+                            {DateUtils.formatDate(ev.timestamp) || 'Unknown time'}
+                            {ev.userName && ` • ${ev.userName}`}
+                          </span>
+                        </li>
+                      ))}
+                      {(!jobDetails.events || jobDetails.events.length === 0) && (
+                        <li className="text-gray-400 text-sm">No timeline events recorded</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Jobs View Component
+function JobsView({ jobs, users, currentUser, onRefresh }) {
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetails, setJobDetails] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  // Filter states
+  const [filters, setFilters] = useState({
+    startDate: '',
+    endDate: '',
+    serviceType: '',
+    vehicleType: '', // new/used
+    detailer: '',
+    status: ''
+  });
+
+  // Get unique values for filter options
+  const filterOptions = useMemo(() => {
+    const serviceTypes = [...new Set(jobs.map(j => j.serviceType).filter(Boolean))];
+    const detailers = Object.values(users || {}).filter(u => u.role === 'detailer');
+    const statuses = [...new Set(jobs.map(j => j.status).filter(Boolean))];
+    
+    return { serviceTypes, detailers, statuses };
+  }, [jobs, users]);
+
+  // Filter jobs based on current filter settings
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      // Date filter
+      if (filters.startDate) {
+        const jobDate = new Date(job.date);
+        const startDate = new Date(filters.startDate);
+        if (jobDate < startDate) return false;
+      }
+      
+      if (filters.endDate) {
+        const jobDate = new Date(job.date);
+        const endDate = new Date(filters.endDate);
+        if (jobDate > endDate) return false;
+      }
+      
+      // Service type filter
+      if (filters.serviceType && job.serviceType !== filters.serviceType) return false;
+      
+      // Vehicle type filter (new/used)
+      if (filters.vehicleType) {
+        const vehicleDesc = (job.vehicleDescription || '').toLowerCase();
+        if (filters.vehicleType === 'new' && !vehicleDesc.includes('new')) return false;
+        if (filters.vehicleType === 'used' && vehicleDesc.includes('new')) return false;
+      }
+      
+      // Detailer filter
+      if (filters.detailer && job.technicianId !== filters.detailer) return false;
+      
+      // Status filter
+      if (filters.status && job.status !== filters.status) return false;
+      
+      return true;
+    });
+  }, [jobs, filters]);
+
+  const clearFilters = () => {
+    setFilters({
+      startDate: '',
+      endDate: '',
+      serviceType: '',
+      vehicleType: '',
+      detailer: '',
+      status: ''
+    });
+  };
+
+  const openDetails = async (job) => {
+    setSelectedJob(job);
+    setLoading(true);
+    setError('');
+    setJobDetails(null);
+    try {
+      const jobId = job.id || job._id;
+      if (!jobId) {
+        setError('Job ID not found');
+        return;
+      }
+      const res = await V2.get(`/jobs/${jobId}`);
+      if (res.data) {
+        setJobDetails(res.data);
+      } else {
+        setError('Job details not found');
+      }
+    } catch (err) {
+      console.error('Job details error:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to load job details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeDetails = () => {
+    setSelectedJob(null);
+    setJobDetails(null);
+    setError('');
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Filters */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-white font-medium">Filters</h4>
+          <button
+            onClick={clearFilters}
+            className="px-3 py-1 text-sm bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/20"
+          >
+            Clear All
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">Start Date</label>
+            <input
+              type="date"
+              value={filters.startDate}
+              onChange={e => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">End Date</label>
+            <input
+              type="date"
+              value={filters.endDate}
+              onChange={e => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">Service Type</label>
+            <select
+              value={filters.serviceType}
+              onChange={e => setFilters(prev => ({ ...prev, serviceType: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="" className="bg-gray-800">All Types</option>
+              {filterOptions.serviceTypes.map(type => (
+                <option key={type} value={type} className="bg-gray-800">{type}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">Vehicle Type</label>
+            <select
+              value={filters.vehicleType}
+              onChange={e => setFilters(prev => ({ ...prev, vehicleType: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="" className="bg-gray-800">All Vehicles</option>
+              <option value="new" className="bg-gray-800">New</option>
+              <option value="used" className="bg-gray-800">Used</option>
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">Detailer</label>
+            <select
+              value={filters.detailer}
+              onChange={e => setFilters(prev => ({ ...prev, detailer: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="" className="bg-gray-800">All Detailers</option>
+              {filterOptions.detailers.map(detailer => (
+                <option key={detailer.id} value={detailer.id} className="bg-gray-800">{detailer.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-gray-300 text-xs mb-1">Status</label>
+            <select
+              value={filters.status}
+              onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
+              className="w-full bg-white/10 text-white text-sm border border-white/20 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="" className="bg-gray-800">All Status</option>
+              {filterOptions.statuses.map(status => (
+                <option key={status} value={status} className="bg-gray-800">{status}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        
+        <div className="mt-3 text-sm text-gray-400">
+          Showing {filteredJobs.length} of {jobs.length} jobs
+        </div>
+      </div>
+
+      {/* Jobs List */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">All Jobs</h3>
+        <div className="space-y-3 max-h-96 overflow-y-auto">
+          {filteredJobs.map(job => (
+          <button
+            key={job.id}
+            onClick={() => openDetails(job)}
+            className="w-full text-left bg-white/5 rounded-lg p-4 border border-white/10 hover:bg-white/10 transition-colors"
+          >
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-white font-medium text-lg">{job.vehicleDescription}</p>
+                  {job.color && (
+                    <span className="px-2 py-1 bg-white/10 text-white text-xs rounded-full font-medium">
+                      {job.color}
+                    </span>
+                  )}
+                  {job.priority && job.priority !== 'Normal' && (
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      job.priority === 'Urgent' ? 'bg-red-500/20 text-red-400' :
+                      job.priority === 'High' ? 'bg-orange-500/20 text-orange-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {job.priority}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm mb-2">
+                  <p className="text-gray-300">Stock: <span className="text-white font-medium">{job.stockNumber}</span></p>
+                  <p className="text-gray-300">VIN: <span className="font-mono text-white text-xs">{job.vin?.slice(-6) || 'N/A'}</span></p>
+                </div>
+                <div className="flex items-center gap-4 text-sm mb-2">
+                  <span className="text-white font-medium">{job.technicianName}</span>
+                  <span className="text-blue-300 font-medium">{job.serviceType}</span>
+                </div>
+                {job.salesPerson && (
+                  <p className="text-blue-300 text-sm mb-2">Sales: {job.salesPerson}</p>
+                )}
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                  {job.startTime && (
+                    <p>Started: {DateUtils.formatDateTime(job.startTime)}</p>
+                  )}
+                  {job.completedAt ? (
+                    <p className="text-green-400">Finished: {DateUtils.formatDateTime(job.completedAt)}</p>
+                  ) : (
+                    <p>Created: {DateUtils.formatDate(job.date || job.createdAt)}</p>
+                  )}
+                </div>
+              </div>
+              <div className="text-right ml-4">
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  job.status === 'In Progress' 
+                    ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-400/30' 
+                    : 'bg-green-500/20 text-green-400 border border-green-400/30'
+                }`}>
+                  {job.status}
+                </span>
+                {job.status === 'In Progress' && job.startTime && (
+                  <div className="mt-2">
+                    <LiveTimer startTime={job.startTime} className="text-yellow-300 font-mono text-lg font-bold" />
+                    <p className="text-gray-400 text-xs mt-1">Current Time</p>
+                  </div>
+                )}
+                {job.status === 'Completed' && job.completedAt && (job.startTime || job.startedAt) && (
+                  <div className="mt-2">
+                    <p className="text-green-400 font-bold text-lg">
+                      {DateUtils.formatDuration(
+                        DateUtils.calculateDuration(
+                          job.startTime || job.startedAt, 
+                          job.completedAt
+                        )
+                      )}
+                    </p>
+                    <p className="text-gray-400 text-xs">Total Time</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Details Modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 w-full max-w-2xl border border-white/20">
+            <div className="flex justify-between items-start mb-4">
+              <h4 className="text-white font-semibold text-lg">Job Details</h4>
+              <button onClick={closeDetails} className="text-white/80 hover:text-white">✕</button>
+            </div>
+            {loading && <p className="text-gray-300">Loading…</p>}
+            {error && <p className="text-red-300">{error}</p>}
+            {jobDetails && (
+              <div className="space-y-4">
+                <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <h5 className="text-white font-medium mb-2">Vehicle Information</h5>
+                      <p className="text-white font-medium text-lg">{selectedJob.vehicleDescription}</p>
+                      <p className="text-gray-300 text-sm">VIN: {jobDetails.job?.vin}</p>
+                      <p className="text-gray-300 text-sm">Stock Number: {jobDetails.job?.stockNumber}</p>
+                      <p className="text-gray-300 text-sm">Service Type: {jobDetails.job?.serviceType}</p>
+                      {jobDetails.job?.salesPerson && (
+                        <p className="text-blue-300 text-sm">Sales Person: {jobDetails.job.salesPerson}</p>
+                      )}
+                    </div>
+                    <div>
+                      <h5 className="text-white font-medium mb-2">Job Status & Timing</h5>
+                      <p className={`text-sm font-medium ${
+                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-400' : 'text-green-400'
+                      }`}>
+                        Status: {jobDetails.job?.status}
+                      </p>
+                      {jobDetails.job?.startTime && (
+                        <div className="space-y-1">
+                          <p className="text-gray-300 text-sm">
+                            Started: {new Date(jobDetails.job.startTime).toLocaleString()}
+                          </p>
+                          {jobDetails.job?.status === 'In Progress' && (
+                            <div>
+                              <p className="text-gray-300 text-sm">Current Duration:</p>
+                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-300 font-mono text-xl" />
+                            </div>
+                          )}
+                          {jobDetails.job?.completedAt && (
+                            <p className="text-gray-300 text-sm">
+                              Completed: {new Date(jobDetails.job.completedAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <p className="text-gray-400 text-xs mt-2">Created: {jobDetails.job?.date}</p>
+                    </div>
+                  </div>
+                  {jobDetails.job?.status !== 'completed' && (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={async () => { 
+                          try { 
+                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                            if (!jobId) return alert('Job ID not found');
+                            await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id }); 
+                            await onRefresh?.(); 
+                            closeDetails(); 
+                            alert('Timer stopped');
+                          } catch (e) { 
+                            alert('Stop failed: ' + (e.response?.data?.error || e.message)); 
+                          } 
+                        }}
+                        className="px-3 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-white text-sm"
+                      >
+                        Stop Timer
+                      </button>
+                      <button
+                        onClick={async () => { 
+                          try { 
+                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                            if (!jobId) return alert('Job ID not found');
+                            await V2.put(`/jobs/${jobId}/complete`, { 
+                              userId: currentUser?.id,
+                              completedAt: new Date().toISOString()
+                            }); 
+                            await onRefresh?.(); 
+                            closeDetails(); 
+                            alert('Job marked complete');
+                          } catch (e) { 
+                            alert('Complete failed: ' + (e.response?.data?.error || e.message)); 
+                          } 
+                        }}
+                        className="px-3 py-2 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
+                      >
+                        Mark Complete
+                      </button>
+                      <button
+                        onClick={async () => { 
+                          try { 
+                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                            if (!jobId) return alert('Job ID not found');
+                            await V2.put(`/jobs/${jobId}/join`, { userId: currentUser?.id }); 
+                            await onRefresh?.(); 
+                            alert('Assigned to you'); 
+                          } catch (e) { 
+                            alert('Assign failed: ' + (e.response?.data?.error || e.message)); 
+                          } 
+                        }}
+                        className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
+                      >
+                        Assign Me
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                    <h5 className="text-white font-medium mb-2">Technicians</h5>
+                    <ul className="space-y-1">
+                      {(jobDetails.technicians || []).map(t => (
+                        <li key={t.userId} className="text-gray-300 text-sm">• {t.userName || t.name || t.userId}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                    <h5 className="text-white font-medium mb-2">Timeline</h5>
+                    <ul className="space-y-3 max-h-56 overflow-auto pr-2">
+                      {/* Job Started Event */}
+                      {jobDetails.job?.startTime && (
+                        <li className="text-gray-300 text-sm border-l-2 border-green-400 pl-3">
+                          <span className="text-green-400 font-medium">Job Started</span>
+                          <span className="text-gray-400 block text-xs mt-1">
+                            {DateUtils.formatDateTime(jobDetails.job.startTime)}
+                            {jobDetails.job?.technicianName && ` • ${jobDetails.job.technicianName}`}
+                          </span>
+                        </li>
+                      )}
+                      
+                      {/* Job Completed Event */}
+                      {jobDetails.job?.completedAt && (
+                        <li className="text-gray-300 text-sm border-l-2 border-blue-400 pl-3">
+                          <span className="text-blue-400 font-medium">Job Completed</span>
+                          <span className="text-gray-400 block text-xs mt-1">
+                            {DateUtils.formatDateTime(jobDetails.job.completedAt)}
+                            {jobDetails.job?.duration && ` • Duration: ${DateUtils.formatDuration(jobDetails.job.duration)}`}
+                          </span>
+                        </li>
+                      )}
+                      
+                      {/* Other Timeline Events */}
+                      {(jobDetails.events || []).map((ev, idx) => {
+                        const validDate = DateUtils.getValidDate(ev.timestamp || ev.at);
+                        return (
+                          <li key={idx} className="text-gray-300 text-sm border-l-2 border-gray-500 pl-3">
+                            <span className="text-white/90 font-medium">
+                              {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
+                            </span>
+                            <span className="text-gray-400 block text-xs mt-1">
+                              {validDate ? DateUtils.formatDateTime(validDate) : 'Invalid Date'}
+                              {ev.userName && ` • ${ev.userName}`}
+                            </span>
+                          </li>
+                        );
+                      })}
+                      
+                      {(!jobDetails.job?.startTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
+                        <li className="text-gray-400 text-sm">No timeline events recorded</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
 }
 
-function JobDetailsModal({ job, users, onClose }) {
-  if (!job) return null;
+// Users View Component
+function UsersView({ users, detailers, onDeleteUser }) {
+  const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer' });
+  const [isAdding, setIsAdding] = useState(false);
 
-  const assignedTechs = job.assignedTechnicianIds.map(id => users[id]).filter(Boolean);
+  const handleAddDetailer = async (e) => {
+    e.preventDefault();
+    if (!newUser.name || !newUser.pin) return;
+    if (newUser.pin.length !== 4) {
+      alert('PIN must be exactly 4 digits');
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      await V2.post('/users', {
+        name: newUser.name,
+        pin: newUser.pin,
+        role: newUser.role
+      });
+      setNewUser({ name: '', pin: '', role: 'detailer' });
+      alert('User added successfully');
+    } catch (err) {
+      alert('Failed to add user: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full" onClick={e => e.stopPropagation()}>
-        <div className="flex justify-between items-center border-b pb-3 mb-4">
-          <h2 className="text-2xl font-bold text-gray-800">Job Details</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800">&times;</button>
+    <div className="space-y-6">
+      {/* Add New User */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Add New Team Member</h3>
+        <form onSubmit={handleAddDetailer} className="space-y-4">
+          <input
+            type="text"
+            value={newUser.name}
+            onChange={(e) => setNewUser({...newUser, name: e.target.value})}
+            placeholder="Full Name"
+            className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <input
+            type="text"
+            value={newUser.pin}
+            onChange={(e) => setNewUser({...newUser, pin: e.target.value})}
+            placeholder="4-Digit PIN"
+            maxLength="4"
+            className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <div>
+            <label className="block text-gray-300 text-sm mb-2">Role</label>
+            <select
+              value={newUser.role}
+              onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+              className="w-full bg-white/10 text-white border border-white/20 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="detailer" className="bg-gray-800">Detailer</option>
+              <option value="manager" className="bg-gray-800">Manager</option>
+            </select>
+          </div>
+          <button 
+            type="submit"
+            disabled={isAdding}
+            className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500"
+          >
+            {isAdding ? 'Adding...' : 'Add Member'}
+          </button>
+        </form>
+      </div>
+
+      {/* Current Detailers */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Current Detailers</h3>
+        <div className="space-y-3">
+          {detailers.map(detailer => (
+            <div key={detailer.id || detailer._id} className="bg-white/5 rounded-lg p-4 border border-white/10 flex justify-between items-center">
+              <div>
+                <p className="text-white font-medium">{detailer.name}</p>
+                <p className="text-gray-300 text-sm">PIN: {detailer.pin}</p>
+              </div>
+              <button 
+                onClick={() => onDeleteUser(detailer.id || detailer._id)}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><strong className="text-gray-600">Vehicle:</strong> {job.vehicleDescription}</div>
-          <div><strong className="text-gray-600">VIN:</strong> {job.vin}</div>
-          <div><strong className="text-gray-600">Stock #:</strong> {job.stockNumber}</div>
-          <div><strong className="text-gray-600">Service:</strong> {job.serviceType}</div>
-          <div><strong className="text-gray-600">Date:</strong> {new Date(job.date).toLocaleDateString()}</div>
-          <div><strong className="text-gray-600">Status:</strong> {job.status}</div>
-          <div><strong className="text-gray-600">Start Time:</strong> {formatTime(job.startTime)}</div>
-          <div><strong className="text-gray-600">End Time:</strong> {formatTime(job.endTime)}</div>
-          <div><strong className="text-gray-600">Total Duration:</strong> {formatDuration(job.duration)}</div>
+      </div>
+    </div>
+  );
+}
+
+// Enhanced Reports View Component with Interactive Analytics
+function ReportsView({ jobs, users }) {
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [selectedDetailer, setSelectedDetailer] = useState(null);
+  const [selectedServiceType, setSelectedServiceType] = useState(null);
+  const [drillDownJobs, setDrillDownJobs] = useState([]);
+  const [showDrillDown, setShowDrillDown] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!start && !end) return jobs;
+    const s = start ? new Date(start) : null;
+    const e = end ? new Date(end) : null;
+    return jobs.filter(j => {
+      const jobDate = new Date(j.date || j.startTime || j.createdAt);
+      if (s && jobDate < s) return false;
+      if (e && jobDate > e) return false;
+      return true;
+    });
+  }, [jobs, start, end]);
+
+  const reportData = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const last7Days = jobs.filter(j => {
+      const jobDate = new Date(j.date);
+      const daysDiff = (new Date(today) - jobDate) / (1000 * 60 * 60 * 24);
+      return daysDiff <= 7;
+    });
+    
+    const serviceTypeCounts = filtered.reduce((acc, job) => {
+      acc[job.serviceType] = (acc[job.serviceType] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Enhanced performance analysis with time focus
+    const detailerPerformance = {};
+    const serviceTypePerformance = {};
+    const userMap = Object.values(users || {}).reduce((acc, u) => ({ ...acc, [u.id]: u }), {});
+    
+    filtered.forEach(job => {
+      const techId = job.technicianId;
+      const techName = job.technicianName || userMap[techId]?.name || 'Unknown';
+      const serviceType = job.serviceType || 'Unknown';
+      
+      // Detailer performance tracking
+      if (!detailerPerformance[techId]) {
+        detailerPerformance[techId] = {
+          id: techId,
+          name: techName,
+          totalJobs: 0,
+          completedJobs: 0,
+          totalTime: 0,
+          avgTime: 0,
+          minTime: Infinity,
+          maxTime: 0,
+          serviceTypes: {},
+          recentJobs: []
+        };
+      }
+      
+      // Service type performance tracking
+      if (!serviceTypePerformance[serviceType]) {
+        serviceTypePerformance[serviceType] = {
+          name: serviceType,
+          totalJobs: 0,
+          completedJobs: 0,
+          totalTime: 0,
+          avgTime: 0,
+          minTime: Infinity,
+          maxTime: 0,
+          detailers: new Set(),
+          jobs: []
+        };
+      }
+      
+      detailerPerformance[techId].totalJobs++;
+      serviceTypePerformance[serviceType].totalJobs++;
+      serviceTypePerformance[serviceType].detailers.add(techName);
+      serviceTypePerformance[serviceType].jobs.push(job);
+      
+      if (job.status === 'Completed') {
+        detailerPerformance[techId].completedJobs++;
+        serviceTypePerformance[serviceType].completedJobs++;
+        
+        // Calculate duration in minutes
+        let duration = 0;
+        if (job.duration) {
+          duration = job.duration;
+        } else if (job.startTime && job.completedAt) {
+          duration = DateUtils.calculateDuration(job.startTime, job.completedAt);
+        } else if (job.startedAt && job.completedAt) {
+          duration = DateUtils.calculateDuration(job.startedAt, job.completedAt);
+        }
+        
+        if (duration > 0) {
+          detailerPerformance[techId].totalTime += duration;
+          detailerPerformance[techId].minTime = Math.min(detailerPerformance[techId].minTime, duration);
+          detailerPerformance[techId].maxTime = Math.max(detailerPerformance[techId].maxTime, duration);
+          
+          serviceTypePerformance[serviceType].totalTime += duration;
+          serviceTypePerformance[serviceType].minTime = Math.min(serviceTypePerformance[serviceType].minTime, duration);
+          serviceTypePerformance[serviceType].maxTime = Math.max(serviceTypePerformance[serviceType].maxTime, duration);
+        }
+        
+        // Keep recent jobs for drill-down
+        detailerPerformance[techId].recentJobs.push(job);
+        if (detailerPerformance[techId].recentJobs.length > 10) {
+          detailerPerformance[techId].recentJobs.shift();
+        }
+      }
+      
+      // Track service types per detailer
+      const st = job.serviceType || 'Unknown';
+      detailerPerformance[techId].serviceTypes[st] = (detailerPerformance[techId].serviceTypes[st] || 0) + 1;
+    });
+
+    // Calculate averages and efficiency metrics
+    Object.keys(detailerPerformance).forEach(techId => {
+      const perf = detailerPerformance[techId];
+      if (perf.completedJobs > 0) {
+        perf.avgTime = Math.round(perf.totalTime / perf.completedJobs);
+        if (perf.minTime === Infinity) perf.minTime = 0;
+      }
+    });
+    
+    Object.keys(serviceTypePerformance).forEach(serviceType => {
+      const perf = serviceTypePerformance[serviceType];
+      if (perf.completedJobs > 0) {
+        perf.avgTime = Math.round(perf.totalTime / perf.completedJobs);
+        if (perf.minTime === Infinity) perf.minTime = 0;
+        perf.detailers = Array.from(perf.detailers);
+      }
+    });
+
+    // Daily performance
+    const dailyStats = {};
+    filtered.forEach(job => {
+      const date = job.date;
+      if (!dailyStats[date]) {
+        dailyStats[date] = { total: 0, completed: 0 };
+      }
+      dailyStats[date].total++;
+      if (job.status === 'Completed') {
+        dailyStats[date].completed++;
+      }
+    });
+
+    return {
+      totalLast7Days: last7Days.length,
+      completedLast7Days: last7Days.filter(j => j.status === 'Completed').length,
+      serviceTypeCounts,
+      serviceTypePerformance: Object.values(serviceTypePerformance),
+      detailerPerformance: Object.values(detailerPerformance),
+      dailyStats,
+      filteredTotal: filtered.length,
+      filteredCompleted: filtered.filter(j => j.status === 'Completed').length
+    };
+  }, [jobs, users, filtered]);
+
+  // Interactive drill-down functions
+  const handleDetailerClick = (detailer) => {
+    setSelectedDetailer(detailer.name || detailer);
+    setDrillDownJobs(detailer.recentJobs || []);
+    setShowDrillDown(true);
+  };
+
+  const handleServiceTypeClick = (serviceType) => {
+    setSelectedServiceType(serviceType.name || serviceType);
+    setDrillDownJobs(serviceType.jobs || []);
+    setShowDrillDown(true);
+  };
+
+  const closeDrillDown = () => {
+    setShowDrillDown(false);
+    setSelectedDetailer(null);
+    setSelectedServiceType(null);
+    setDrillDownJobs([]);
+  };
+
+  const exportCsv = (rows, filename = 'cleanup-tracker-report.csv') => {
+    if (!rows || rows.length === 0) return alert('No data to export');
+    const headers = [
+      'id','date','status','technicianName','serviceType','vin','stockNumber','vehicleDescription','duration','startTime','endTime'
+    ];
+    const esc = (v) => {
+      if (v == null) return '';
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const csv = [headers.join(',')]
+      .concat(rows.map(r => headers.map(h => esc(r[h])).join(',')))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPdf = async () => {
+    try {
+      // Create comprehensive HTML report that can be printed as PDF
+      const period = start && end ? `${start} to ${end}` : 'All Time';
+      
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Cleanup Tracker Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: white; color: black; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 15px; }
+        .section { margin-bottom: 25px; }
+        .section h2 { background: #f0f0f0; padding: 10px; margin: 0 0 15px 0; border-left: 4px solid #007acc; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #ddd; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #007acc; }
+        .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f0f0f0; font-weight: bold; }
+        .performance-table td:nth-child(2), .performance-table td:nth-child(3), .performance-table td:nth-child(4), .performance-table td:nth-child(5) { text-align: right; }
+        .service-item { margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-radius: 4px; }
+        .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #666; }
+        @media print { body { margin: 0; } .no-print { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚗 CLEANUP TRACKER</h1>
+        <h2>Performance Report</h2>
+        <p><strong>Report Period:</strong> ${period} | <strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+    </div>
+    
+    <div class="section">
+        <h2>📊 Summary Statistics</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">${reportData.filteredTotal}</div>
+                <div class="stat-label">Total Jobs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${reportData.filteredCompleted}</div>
+                <div class="stat-label">Completed Jobs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${reportData.filteredTotal ? Math.round((reportData.filteredCompleted / reportData.filteredTotal) * 100) : 0}%</div>
+                <div class="stat-label">Completion Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${reportData.totalLast7Days}</div>
+                <div class="stat-label">Last 7 Days</div>
+            </div>
         </div>
-        <div className="mt-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-3">Assigned Technicians</h3>
-          <table className="w-full text-left">
+    </div>
+
+    <div class="section">
+        <h2>👥 Detailer Performance</h2>
+        <table class="performance-table">
             <thead>
-              <tr className="bg-gray-100">
-                <th className="p-2">Name</th>
-                <th className="p-2">Time Started</th>
-                <th className="p-2">Time Ended</th>
-                <th className="p-2">Individual Duration</th>
+                <tr>
+                    <th>Detailer Name</th>
+                    <th>Total Jobs</th>
+                    <th>Completed</th>
+                    <th>Success Rate</th>
+                    <th>Avg Time</th>
+                    <th>Top Services</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${reportData.detailerPerformance.map(perf => {
+                    const completionRate = perf.totalJobs ? Math.round((perf.completedJobs / perf.totalJobs) * 100) : 0;
+                    const avgTimeStr = perf.avgTime ? DateUtils.formatDuration(perf.avgTime) : 'N/A';
+                    const topServices = Object.entries(perf.serviceTypes).sort(([,a], [,b]) => b - a).slice(0, 3).map(([k,v]) => `${k}(${v})`).join(', ');
+                    return `
+                    <tr>
+                        <td><strong>${perf.name}</strong></td>
+                        <td>${perf.totalJobs}</td>
+                        <td>${perf.completedJobs}</td>
+                        <td>${completionRate}%</td>
+                        <td>${avgTimeStr}</td>
+                        <td>${topServices}</td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🔧 Service Type Breakdown</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+            ${Object.entries(reportData.serviceTypeCounts).map(([type, count]) => {
+                const percentage = reportData.filteredTotal ? Math.round((count / reportData.filteredTotal) * 100) : 0;
+                return `<div class="service-item"><strong>${type}</strong>: ${count} jobs (${percentage}%)</div>`;
+            }).join('')}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>📅 Recent Activity</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Detailer</th>
+                    <th>Service</th>
+                    <th>Vehicle</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${filtered.slice(0, 50).map(job => {
+                    const duration = job.duration ? DateUtils.formatDuration(job.duration) : DateUtils.formatDuration(DateUtils.calculateDuration(job.startTime || job.startedAt, job.completedAt));
+                    return `
+                    <tr>
+                        <td>${job.date}</td>
+                        <td>${job.technicianName}</td>
+                        <td>${job.serviceType}</td>
+                        <td>${job.vehicleDescription}</td>
+                        <td>${job.status}</td>
+                        <td>${duration}</td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        <p>Report generated by Cleanup Tracker - Mission Ford of Dearborn</p>
+        <p class="no-print">To save as PDF: Use your browser's Print function and select "Save as PDF"</p>
+    </div>
+</body>
+</html>`;
+
+      // Create and open HTML report in new window for printing/PDF
+      const newWindow = window.open('', '_blank');
+      newWindow.document.write(htmlContent);
+      newWindow.document.close();
+      
+      // Auto-trigger print dialog
+      setTimeout(() => {
+        newWindow.print();
+      }, 1000);
+      
+      alert('PDF report opened in new window. Use your browser\'s print function to save as PDF.');
+    } catch (err) {
+      alert('Export failed: ' + err.message);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Filters & Export */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4">
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">Start Date</label>
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} className="w-full bg-white/10 text-white border border-white/20 rounded-lg py-2 px-3 focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">End Date</label>
+            <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="w-full bg-white/10 text-white border border-white/20 rounded-lg py-2 px-3 focus:outline-none" />
+          </div>
+          <div className="md:col-span-2 flex gap-2">
+            <button
+              onClick={() => exportCsv(filtered, 'cleanup-tracker-filtered.csv')}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm"
+            >
+              📊 Export CSV
+            </button>
+            <button
+              onClick={exportPdf}
+              className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm"
+            >
+              📄 Export Report
+            </button>
+            <button
+              onClick={() => { setStart(''); setEnd(''); }}
+              className="px-4 py-2 rounded-lg border border-white/20 text-white bg-white/10 hover:bg-white/20 text-sm"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Period Total</h4>
+          <p className="text-3xl font-bold text-white">{reportData.filteredTotal}</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Completed</h4>
+          <p className="text-3xl font-bold text-green-400">{reportData.filteredCompleted}</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Completion Rate</h4>
+          <p className="text-3xl font-bold text-blue-400">{reportData.filteredTotal ? Math.round((reportData.filteredCompleted / reportData.filteredTotal) * 100) : 0}%</p>
+        </div>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+          <h4 className="text-gray-300 text-sm font-medium">Last 7 Days</h4>
+          <p className="text-3xl font-bold text-yellow-400">{reportData.totalLast7Days}</p>
+        </div>
+      </div>
+
+      {/* Detailer Performance - Click to see details */}
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">📈 Detailer Performance (Click for Details)</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/20">
+                <th className="text-left text-gray-300 text-sm font-medium py-2">Name</th>
+                <th className="text-right text-gray-300 text-sm font-medium py-2">Total Jobs</th>
+                <th className="text-right text-gray-300 text-sm font-medium py-2">Avg Time</th>
+                <th className="text-right text-gray-300 text-sm font-medium py-2">Min Time</th>
+                <th className="text-right text-gray-300 text-sm font-medium py-2">Max Time</th>
+                <th className="text-right text-gray-300 text-sm font-medium py-2">Recent Jobs</th>
               </tr>
             </thead>
             <tbody>
-              {assignedTechs.map(tech => {
-                const timer = job.techTimers?.[tech.id];
+              {reportData.detailerPerformance.map((perf, idx) => {
+                const avgTimeStr = perf.avgTime ? DateUtils.formatDuration(perf.avgTime) : 'N/A';
+                const minTimeStr = perf.minTime ? DateUtils.formatDuration(perf.minTime) : 'N/A';
+                const maxTimeStr = perf.maxTime ? DateUtils.formatDuration(perf.maxTime) : 'N/A';
                 return (
-                  <tr key={tech.id} className="border-b">
-                    <td className="p-2">{tech.name}</td>
-                    <td className="p-2">{timer ? formatTime(timer.startedAt) : 'Not Started'}</td>
-                    <td className="p-2">{timer ? formatTime(timer.endedAt) : 'In Progress'}</td>
-                    <td className="p-2">{timer ? formatDuration(timer.duration) : 'N/A'}</td>
+                  <tr 
+                    key={idx} 
+                    className="border-b border-white/10 cursor-pointer hover:bg-white/10 transition-all"
+                    onClick={() => handleDetailerClick(perf.name)}
+                  >
+                    <td className="text-white py-3 font-medium">{perf.name}</td>
+                    <td className="text-gray-300 text-right py-3">{perf.totalJobs}</td>
+                    <td className="text-green-400 text-right py-3 font-medium">{avgTimeStr}</td>
+                    <td className="text-blue-400 text-right py-3">{minTimeStr}</td>
+                    <td className="text-red-400 text-right py-3">{maxTimeStr}</td>
+                    <td className="text-gray-300 text-right py-3">{perf.recentJobs ? perf.recentJobs.length : 0}</td>
                   </tr>
                 );
               })}
@@ -638,422 +2627,333 @@ function JobDetailsModal({ job, users, onClose }) {
           </table>
         </div>
       </div>
-    </div>
-  );
-}
 
-function UsersList({ users, managers }) {
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
+      {/* Service Type Breakdown - Click to see details */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+          <h3 className="text-white font-semibold text-lg mb-4">🔧 Service Types (Click for Details)</h3>
+          <div className="space-y-3">
+            {(reportData.serviceTypePerformance || []).map((data, idx) => {
+              const avgTimeStr = data.avgTime ? DateUtils.formatDuration(data.avgTime) : 'N/A';
+              const minTimeStr = data.minTime ? DateUtils.formatDuration(data.minTime) : 'N/A';
+              const maxTimeStr = data.maxTime ? DateUtils.formatDuration(data.maxTime) : 'N/A';
+              return (
+                <div 
+                  key={idx} 
+                  className="space-y-2 p-3 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-all"
+                  onClick={() => handleServiceTypeClick(data)}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="text-white font-medium">{data.name}</span>
+                    <span className="text-gray-300 text-sm">{data.jobs?.length || 0} jobs</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div className="text-center">
+                      <div className="text-green-400 font-medium">{avgTimeStr}</div>
+                      <div className="text-gray-400 text-xs">Avg Time</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-blue-400 font-medium">{minTimeStr}</div>
+                      <div className="text-gray-400 text-xs">Min Time</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-red-400 font-medium">{maxTimeStr}</div>
+                      <div className="text-gray-400 text-xs">Max Time</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-  const handleAddUser = async (name, pin) => {
-    try {
-      await V2.post('/users', { name, pin });
-      setIsAdding(false);
-    } catch (err) {
-      alert(`Failed to add user: ${err?.response?.data?.error || err.message}`);
-    }
-  };
-
-  const handleUpdateUser = async (id, name, pin) => {
-    try {
-      await V2.put(`/users/${id}`, { name, pin });
-      setEditingUser(null);
-    } catch (err) {
-      alert(`Failed to update user: ${err?.response?.data?.error || err.message}`);
-    }
-  };
-
-  const handleDeleteUser = async (id) => {
-    if (window.confirm('Are you sure you want to delete this user?')) {
-      try {
-        await V2.delete(`/users/${id}`);
-      } catch (err) {
-        alert('Failed to delete user.');
-      }
-    }
-  };
-
-  return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Technicians</h2>
-        <button onClick={() => setIsAdding(true)} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
-          Add Technician
-        </button>
+        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+          <h3 className="text-white font-semibold text-lg mb-4">📅 Daily Trends</h3>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {Object.entries(reportData.dailyStats)
+              .sort(([a], [b]) => new Date(b) - new Date(a))
+              .slice(0, 10)
+              .map(([date, stats]) => {
+                const rate = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
+                return (
+                  <div key={date} className="flex justify-between items-center p-2 bg-white/5 rounded">
+                    <span className="text-gray-300 text-sm">{new Date(date).toLocaleDateString()}</span>
+                    <span className="text-white text-sm">{stats.completed}/{stats.total} ({rate}%)</span>
+                  </div>
+                );
+              })
+            }
+          </div>
+        </div>
       </div>
-      <table className="w-full text-left mb-8">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-3">Name</th>
-            <th className="p-3">PIN</th>
-            <th className="p-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(user => (
-            <tr key={user.id} className="border-b">
-              <td className="p-3">{user.name}</td>
-              <td className="p-3">{user.pin}</td>
-              <td className="p-3">
-                <button onClick={() => setEditingUser(user)} className="text-blue-500 hover:underline mr-4">Edit</button>
-                <button onClick={() => handleDeleteUser(user.id)} className="text-red-500 hover:underline">Delete</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
 
-      <h2 className="text-xl font-bold mb-4">Managers</h2>
-      <table className="w-full text-left">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-3">Name</th>
-            <th className="p-3">Username</th>
-          </tr>
-        </thead>
-        <tbody>
-          {managers.map(user => (
-            <tr key={user.id} className="border-b">
-              <td className="p-3">{user.name}</td>
-              <td className="p-3">{user.username}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* Drill-Down Modal */}
+      {showDrillDown && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-xl p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto border border-white/20">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-semibold text-xl">
+                {selectedDetailer ? `${selectedDetailer} - Job Details` : `${selectedServiceType} - Job Details`}
+              </h3>
+              <button
+                onClick={closeDrillDown}
+                className="text-gray-400 hover:text-white transition-colors text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="mb-4 text-gray-300">
+              Showing {drillDownJobs.length} jobs
+            </div>
 
-      {(isAdding || editingUser) && (
-        <UserEditModal
-          user={editingUser}
-          onClose={() => { setIsAdding(false); setEditingUser(null); }}
-          onSave={editingUser ? (name, pin) => handleUpdateUser(editingUser.id, name, pin) : handleAddUser}
-        />
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/20">
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">VIN</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Service Type</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Detailer</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Status</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Duration</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Started</th>
+                    <th className="text-left text-gray-300 text-sm font-medium py-2">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drillDownJobs.map((job, idx) => {
+                    const startTime = DateUtils.getValidDate(job.startTime || job.startedAt || job.createdAt || job.timestamp || job.date);
+                    const endTime = DateUtils.getValidDate(job.completedAt);
+                    const duration = startTime && endTime ? 
+                      DateUtils.formatDuration(DateUtils.calculateDuration(startTime, endTime)) : 
+                      (startTime ? 'In Progress' : 'N/A');
+                    
+                    return (
+                      <tr key={idx} className="border-b border-white/10 hover:bg-white/5">
+                        <td className="text-white py-2 font-mono text-sm">{job.vin || 'N/A'}</td>
+                        <td className="text-gray-300 py-2">{job.serviceType || 'N/A'}</td>
+                        <td className="text-gray-300 py-2">{job.detailer || job.assignedTo || 'N/A'}</td>
+                        <td className="text-gray-300 py-2">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            job.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                            job.status === 'in_progress' ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {job.status || 'pending'}
+                          </span>
+                        </td>
+                        <td className="text-gray-300 py-2 font-medium">{duration}</td>
+                        <td className="text-gray-300 py-2">
+                          {startTime ? DateUtils.formatDateTime(startTime) : 'N/A'}
+                        </td>
+                        <td className="text-gray-300 py-2">
+                          {endTime ? DateUtils.formatDateTime(endTime) : 'N/A'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-function UserEditModal({ user, onClose, onSave }) {
-  const [name, setName] = useState(user?.name || '');
-  const [pin, setPin] = useState(user?.pin || '');
+// Main Component - This is only V2, no switching
+export default function FirebaseV2() {
+  const [user, setUser] = useState(null);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSave(name, pin);
+  const handleLogin = (userData) => {
+    setUser(userData);
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+  };
+
+  if (!user) {
+    return <LoginForm onLogin={handleLogin} />;
+  }
+
+  return <MainApp user={user} onLogout={handleLogout} />;
+}
+
+// Manager Settings View
+function SettingsView({ settings, onSettingsChange }) {
+  const [siteTitle, setSiteTitle] = useState(settings?.siteTitle || 'Cleanup Tracker');
+  const [csvUrl, setCsvUrl] = useState(settings?.inventoryCsvUrl || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSiteTitle(settings?.siteTitle || 'Cleanup Tracker');
+    setCsvUrl(settings?.inventoryCsvUrl || '');
+  }, [settings]);
+
+  const saveSettings = async () => {
+    setSaving(true);
+    try {
+      // Save site title
+      await V2.put('/settings', { key: 'siteTitle', value: siteTitle });
+      // Save CSV URL using settings (and also set-csv for compatibility)
+      if (csvUrl?.trim()) {
+        try {
+          await V2.post('/vehicles/set-csv', { url: csvUrl.trim() });
+        } catch (_) {
+          // fallback to generic settings endpoint
+          await V2.put('/settings', { key: 'inventoryCsvUrl', value: csvUrl.trim() });
+        }
+      }
+      const res = await V2.get('/settings');
+      onSettingsChange(res.data || {});
+      alert('Settings saved.');
+    } catch (err) {
+      alert('Failed to save settings: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAndImport = async () => {
+    await saveSettings();
+    try {
+      await V2.post('/vehicles/refresh');
+      alert('Inventory refreshed from CSV.');
+    } catch (err) {
+      alert('Refresh failed: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const refreshOnly = async () => {
+    try {
+      await V2.post('/vehicles/refresh');
+      alert('Inventory refreshed.');
+    } catch (err) {
+      alert('Refresh failed: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg p-8" onClick={e => e.stopPropagation()}>
-        <h2 className="text-2xl font-bold mb-4">{user ? 'Edit' : 'Add'} Technician</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-gray-700">Name</label>
+    <div className="space-y-6">
+      <section className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">General</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-gray-300 text-sm mb-2">Site Title</label>
+            <input
+              type="text"
+              value={siteTitle}
+              onChange={(e) => setSiteTitle(e.target.value)}
+              className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
+              placeholder="Cleanup Tracker"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">Inventory Source</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-gray-300 text-sm mb-2">Google Sheets CSV URL</label>
+            <input
+              type="url"
+              value={csvUrl}
+              onChange={(e) => setCsvUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv"
+              className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={saveSettings} disabled={saving} className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm disabled:bg-gray-500">Save</button>
+            <button onClick={saveAndImport} disabled={saving} className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm disabled:bg-gray-500">Save & Import</button>
+            <button onClick={refreshOnly} className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm">Refresh Inventory</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// Personal Settings View (for both roles)
+function MySettingsView({ user }) {
+  const [name, setName] = useState(user?.name || '');
+  const [pin, setPin] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) return alert('Name is required');
+    
+    // Restrict PIN changes for detailers
+    if (user.role === 'detailer' && pin) {
+      return alert('PIN changes are not allowed for detailers. Contact your manager.');
+    }
+    
+    if (pin && pin.length !== 4) return alert('PIN must be 4 digits');
+    setSaving(true);
+    try {
+      // Fetch latest user from API list to get ID mapping
+      const all = await V2.get('/users');
+      const me = (all.data || []).find(u => u.id === user.id || u.pin === user.pin || u.name === user.name);
+      if (!me) return alert('Cannot locate your profile');
+      
+      // Only include PIN in update if user is manager
+      const updateData = { name, role: me.role };
+      if (user.role === 'manager' && pin) {
+        updateData.pin = pin;
+      }
+      
+      await V2.put(`/users/${me.id}`, updateData);
+      alert('Profile updated');
+    } catch (err) {
+      alert('Failed to update: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto space-y-4">
+      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+        <h3 className="text-white font-semibold text-lg mb-4">My Settings</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-gray-300 text-sm mb-1">Name</label>
             <input
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-              required
+              className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
             />
           </div>
-          <div className="mb-4">
-            <label className="block text-gray-700">PIN (4 digits)</label>
-            <input
-              type="text"
-              value={pin}
-              onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              className="w-full border rounded px-3 py-2"
-              pattern="\d{4}"
-              title="PIN must be 4 digits"
-              required
-            />
-          </div>
-          <div className="flex justify-end">
-            <button type="button" onClick={onClose} className="mr-4 bg-gray-300 hover:bg-gray-400 text-black font-bold py-2 px-4 rounded">
-              Cancel
-            </button>
-            <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
-              Save
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function Reports({ jobs, users, librariesLoaded }) {
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
-
-  const handleExport = (format) => {
-    if (!librariesLoaded) {
-      alert('Export libraries are not loaded yet. Please wait a moment.');
-      return;
-    }
-
-    const filteredJobs = jobs.filter(job => {
-      const jobDate = new Date(job.date);
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setDate(end.getDate() + 1); // include end date
-      return jobDate >= start && jobDate < end;
-    });
-
-    const data = filteredJobs.map(job => ({
-      'Date': new Date(job.date).toLocaleDateString(),
-      'Vehicle': job.vehicleDescription,
-      'VIN': job.vin,
-      'Stock #': job.stockNumber,
-      'Service': job.serviceType,
-      'Technicians': job.assignedTechnicianIds.map(id => users[id]?.name).join(', '),
-      'Start Time': formatTime(job.startTime),
-      'End Time': formatTime(job.endTime),
-      'Duration (min)': job.duration ? (job.duration / 60000).toFixed(2) : 'N/A',
-      'Status': job.status,
-    }));
-
-    if (format === 'csv') {
-      const ws = window.XLSX.utils.json_to_sheet(data);
-      const wb = window.XLSX.utils.book_new();
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Jobs Report');
-      window.XLSX.writeFile(wb, `Jobs_Report_${startDate}_to_${endDate}.xlsx`);
-    } else if (format === 'pdf') {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      doc.autoTable({
-        head: [Object.keys(data[0] || {})],
-        body: data.map(row => Object.values(row)),
-      });
-      doc.save(`Jobs_Report_${startDate}_to_${endDate}.pdf`);
-    }
-  };
-  
-  const handleRefreshInventory = async () => {
-    if (!window.confirm('This will fetch the latest inventory CSV and update the vehicle database. This can take a moment. Continue?')) return;
-    try {
-      const res = await V2.post('/vehicles/refresh');
-      alert(`Inventory refresh complete. Total rows processed: ${res.data.total}. New vehicles: ${res.data.upserted}. Updated vehicles: ${res.data.modified}.`);
-    } catch (err) {
-      alert(`Inventory refresh failed: ${err?.response?.data?.error || err.message}`);
-    }
-  };
-
-  return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-xl font-bold mb-4">Generate Report</h2>
-      <div className="flex items-center space-x-4 mb-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Start Date</label>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700">End Date</label>
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" />
-        </div>
-        <div className="self-end">
-          <button onClick={() => handleExport('csv')} disabled={!librariesLoaded} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400">
-            Export Excel
-          </button>
-        </div>
-        <div className="self-end">
-          <button onClick={() => handleExport('pdf')} disabled={!librariesLoaded} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400">
-            Export PDF
+          {user.role === 'manager' && (
+            <div>
+              <label className="block text-gray-300 text-sm mb-1">New PIN (optional)</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                value={pin}
+                onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+                className="w-full bg-white/10 text-white placeholder-gray-400 border border-white/20 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
+              />
+            </div>
+          )}
+          {user.role === 'detailer' && (
+            <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-3">
+              <p className="text-amber-300 text-sm">
+                🔒 PIN changes are restricted for detailers. Contact your manager to update your PIN.
+              </p>
+            </div>
+          )}
+          <button onClick={save} disabled={saving} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500">
+            {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>
-      <hr className="my-6" />
-      <h2 className="text-xl font-bold mb-4">Data Management</h2>
-      <button onClick={handleRefreshInventory} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded">
-        Refresh Vehicle Inventory from CSV
-      </button>
-      <p className="text-sm text-gray-500 mt-2">
-        This will pull the latest data from the configured inventory CSV URL.
-      </p>
     </div>
   );
 }
-
-function NewJobForm({ technicians, onJobCreated }) {
-  const [vin, setVin] = useState('');
-  const [stockNumber, setStockNumber] = useState('');
-  const [vehicleDescription, setVehicleDescription] = useState('');
-  const [serviceType, setServiceType] = useState('');
-  const [technicianId, setTechnicianId] = useState('');
-  const [coTechnicianIds, setCoTechnicianIds] = useState([]);
-  const [notes, setNotes] = useState('');
-  const [price, setPrice] = useState('');
-  const [location, setLocation] = useState('');
-
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-
-  useEffect(() => {
-    const search = async () => {
-      if (vin.length < 3 && stockNumber.length < 3) {
-        setSearchResults([]);
-        return;
-      }
-      setIsSearching(true);
-      try {
-        const query = vin || stockNumber;
-        const res = await V2.get(`/vehicles/search?q=${query}`);
-        setSearchResults(res.data || []);
-      } catch {
-        setSearchResults([]);
-      }
-      setIsSearching(false);
-    };
-    const debounce = setTimeout(search, 300);
-    return () => clearTimeout(debounce);
-  }, [vin, stockNumber]);
-
-  const handleSelectVehicle = (vehicle) => {
-    setVin(vehicle.vin);
-    setStockNumber(vehicle.stockNumber);
-    setVehicleDescription(vehicle.vehicleDescription || toVehicleDescription(vehicle));
-    setSearchResults([]);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!technicianId) {
-      alert('Please select a primary technician.');
-      return;
-    }
-    try {
-      await V2.post('/jobs', {
-        vin, stockNumber, vehicleDescription, serviceType, technicianId,
-        technicianName: technicians.find(t => t.id === technicianId)?.name || '',
-        coTechnicianIds,
-        notes,
-        price: parseFloat(price) || null,
-        location,
-      });
-      alert('Job created successfully!');
-      onJobCreated();
-    } catch (err) {
-      alert(`Failed to create job: ${err?.response?.data?.error || err.message}`);
-    }
-  };
-
-  const handleCoTechnicianChange = (techId) => {
-    setCoTechnicianIds(prev =>
-      prev.includes(techId) ? prev.filter(id => id !== techId) : [...prev, techId]
-    );
-  };
-
-  return (
-    <div className="bg-white p-8 rounded-lg shadow-md max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Create New Job</h2>
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Vehicle Search */}
-          <div className="relative">
-            <label className="block text-sm font-medium text-gray-700">Search VIN / Stock #</label>
-            <input
-              type="text"
-              placeholder="Start typing VIN or Stock..."
-              value={vin || stockNumber}
-              onChange={e => { setVin(e.target.value); setStockNumber(e.target.value); }}
-              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-            />
-            {isSearching && <p className="text-sm text-gray-500">Searching...</p>}
-            {searchResults.length > 0 && (
-              <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded-md mt-1 max-h-60 overflow-auto">
-                {searchResults.map(v => (
-                  <li key={v.vin} onClick={() => handleSelectVehicle(v)} className="p-2 hover:bg-gray-100 cursor-pointer">
-                    {v.vehicleDescription} ({v.vin})
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          {/* Vehicle Details */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Vehicle Description</label>
-            <input type="text" value={vehicleDescription} onChange={e => setVehicleDescription(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">VIN</label>
-            <input type="text" value={vin} onChange={e => setVin(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Stock #</label>
-            <input type="text" value={stockNumber} onChange={e => setStockNumber(e.target.value)} readOnly className="mt-1 block w-full bg-gray-100 border-gray-300 rounded-md shadow-sm sm:text-sm" />
-          </div>
-        </div>
-
-        <hr />
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Service Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Service Type</label>
-            <select value={serviceType} onChange={e => setServiceType(e.target.value)} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-              <option value="">Select Service</option>
-              <option value="Standard Detail">Standard Detail</option>
-              <option value="Premium Detail">Premium Detail</option>
-              <option value="Interior Only">Interior Only</option>
-              <option value="Exterior Only">Exterior Only</option>
-              <option value="Wash and Vac">Wash and Vac</option>
-              <option value="Ceramic Coating">Ceramic Coating</option>
-            </select>
-          </div>
-          {/* Primary Technician */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Primary Technician</label>
-            <select value={technicianId} onChange={e => setTechnicianId(e.target.value)} required className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-              <option value="">Select Technician</option>
-              {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-        </div>
-
-        {/* Co-Technicians */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Additional Technicians</label>
-          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4">
-            {technicians.filter(t => t.id !== technicianId).map(t => (
-              <label key={t.id} className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={coTechnicianIds.includes(t.id)}
-                  onChange={() => handleCoTechnicianChange(t.id)}
-                  className="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-                />
-                <span>{t.name}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <hr />
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Price</label>
-            <input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} placeholder="e.g., 150.00" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Location</label>
-            <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g., Bay 3" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Notes</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows="3" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
-        </div>
-
-        <div className="flex justify-end">
-          <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-colors">
-            Create Job
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
