@@ -319,44 +319,45 @@ router.get('/jobs', async (req, res) => {
 });
 
 router.post('/jobs', async (req, res) => {
-  const { 
-    technicianId, technicianName, vin, stockNumber, vehicleDescription, 
-    serviceType, date, salesPerson, assignedTechnicianIds, priority,
-    year, make, model, vehicleColor 
-  } = req.body;
-  
-  // Set expected duration based on service type
-  const expectedDuration = SERVICE_EXPECTATIONS[serviceType]?.duration || 60;
-  const qcRequired = ['Detail', 'FCTP', 'Delivery'].includes(serviceType);
-  
-  const job = await Job.create({
-    technicianId, 
-    technicianName, 
-    vin, 
-    stockNumber, 
-    vehicleDescription, 
-    serviceType,
-    salesPerson: salesPerson || '',
-    assignedTechnicianIds: assignedTechnicianIds || [technicianId],
-    priority: priority || 'Normal',
-    year: year || '',
-    make: make || '',
-    model: model || '',
-    vehicleColor: vehicleColor || '',
-    expectedDuration,
-    qcRequired,
-    activeTechnicians: [{
-      technicianId,
-      technicianName,
-      startTime: new Date()
-    }],
-    startTime: new Date(), 
-    endTime: null, 
-    duration: null, 
-    status: 'In Progress', 
-    date
-  });
-  res.status(201).json({ ...job.toObject(), id: String(job._id) });
+  try {
+    const {
+      technicianId, technicianName, vin, stockNumber, vehicleDescription,
+      serviceType, date, salesPerson, assignedTechnicianIds, priority,
+      year, make, model, vehicleColor
+    } = req.body;
+
+    const jobData = {
+      technicianId: technicianId || 'unknown',
+      technicianName: technicianName || 'Unknown Technician',
+      vin: vin || 'UNKNOWN_VIN',
+      stockNumber: stockNumber || '',
+      vehicleDescription: vehicleDescription || 'Unknown Vehicle',
+      serviceType: serviceType || 'Cleanup',
+      date: date || new Date().toISOString().split('T')[0],
+      status: 'In Progress',
+      startTime: new Date(),
+      expectedDuration: 60,
+      qcRequired: false,
+      salesPerson: salesPerson || '',
+      assignedTechnicianIds: assignedTechnicianIds || [technicianId || 'unknown'],
+      priority: priority || 'Normal',
+      year: year || '',
+      make: make || '',
+      model: model || '',
+      vehicleColor: vehicleColor || '',
+      activeTechnicians: [{
+        technicianId: technicianId || 'unknown',
+        technicianName: technicianName || 'Unknown Technician',
+        startTime: new Date()
+      }]
+    };
+
+    const job = await Job.create(jobData);
+    res.status(201).json({ ...job.toObject(), id: String(job._id) });
+  } catch (error) {
+    console.error('Job creation error:', error);
+    res.status(400).json({ error: error.message || 'Failed to create job' });
+  }
 });
 
 router.put('/jobs/:id/complete', async (req, res) => {

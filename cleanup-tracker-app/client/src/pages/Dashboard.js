@@ -1,19 +1,19 @@
 import React, { useEffect } from 'react';
 import { connect } from 'react-redux';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const Dashboard = ({ auth }) => {
-    const history = useHistory();
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (auth.isAuthenticated) {
             if (auth.user.role === 'manager' || auth.user.role === 'owner') {
-                history.push('/manager');
+                navigate('/manager');
             } else {
-                history.push('/detailer');
+                navigate('/detailer');
             }
         }
-    }, [auth, history]);
+    }, [auth, navigate]);
 
     return (
         <div>

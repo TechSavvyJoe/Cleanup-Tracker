@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { connect } from 'react-redux';
 import { loginUser } from '../../actions/authActions';
-import { withRouter } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
-const Login = ({ loginUser, history, errors }) => {
+const Login = ({ loginUser, errors }) => {
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         username: '',
         password: ''
@@ -16,7 +17,7 @@ const Login = ({ loginUser, history, errors }) => {
     const onSubmit = e => {
         e.preventDefault();
         const userData = { username, password };
-        loginUser(userData, history);
+        loginUser(userData, navigate);
     };
 
     return (
@@ -55,4 +56,4 @@ const mapStateToProps = state => ({
     errors: state.errors
 });
 
-export default connect(mapStateToProps, { loginUser })(withRouter(Login));
+export default connect(mapStateToProps, { loginUser })(Login);

@@ -4,6 +4,30 @@ import { useToast } from '../components/Toast';
 import ErrorBoundary from '../components/ErrorBoundary';
 import axios from 'axios';
 
+// 🚀 Premium Enterprise Components - Currently Integrated
+import { 
+  GlassCard, 
+  ProgressRing, 
+  StatCard
+  // Available for future integration: SkeletonLoader, CommandPalette, Timeline, Badge, Tooltip
+} from '../components/PremiumUI';
+
+// 📊 Advanced Data Visualizations - Ready to integrate
+// import { 
+//   PerformanceChart, 
+//   BarChart, 
+//   DonutChart, 
+//   Heatmap, 
+//   Sparkline 
+// } from '../components/DataVisualization';
+
+// 🤖 AI-Powered Analytics - Ready to integrate
+// import { 
+//   PredictiveAnalytics, 
+//   IntelligentSearch, 
+//   PerformanceMonitor 
+// } from '../utils/advancedAlgorithms';
+
 // Professional error logging and performance monitoring
 const Logger = {
   error: (message, error, context = {}) => {
@@ -2722,43 +2746,104 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
         </div>
       </div>
 
-      {/* Enhanced Stats Grid with animations */}
+      {/* 🚀 Premium Stats Grid with Advanced Analytics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 hover:scale-105 group">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-gray-600 text-sm font-medium group-hover:text-gray-700">Filtered Jobs</h4>
-              <p className="text-3xl font-bold text-gray-900 animate-pulse">{stats.totalFiltered}</p>
-            </div>
-            <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-gray-200 transition-colors">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:shadow-lg transition-all duration-300 hover:scale-105 group">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="text-gray-600 text-sm font-medium group-hover:text-yellow-600">Active Jobs</h4>
-              <p className="text-3xl font-bold text-yellow-600 animate-pulse">{stats.active}</p>
-            </div>
-            <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center group-hover:bg-yellow-200 transition-colors">
-              <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-          <h4 className="text-gray-600 text-sm font-medium">Completed</h4>
-          <p className="text-3xl font-bold text-green-600">{stats.completed}</p>
-        </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-          <h4 className="text-gray-600 text-sm font-medium">Detailers</h4>
-          <p className="text-3xl font-bold text-blue-600">{stats.detailers}</p>
-        </div>
+        <StatCard
+          title="Total Jobs"
+          value={stats.totalFiltered}
+          change={dateFilter === 'today' ? `${stats.totalToday || stats.totalFiltered} today` : undefined}
+          trend={stats.totalFiltered > (stats.totalToday || 0) ? 'up' : 'down'}
+          color="blue"
+          icon={
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+          }
+        />
+        
+        <StatCard
+          title="Active Jobs"
+          value={stats.active}
+          change={stats.active > 0 ? `${Math.round((stats.active / stats.totalFiltered) * 100)}% in progress` : 'No active jobs'}
+          trend={stats.active > 0 ? 'up' : 'down'}
+          color="yellow"
+          icon={
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          }
+        />
+        
+        <StatCard
+          title="Completed"
+          value={stats.completed}
+          change={stats.completed > 0 ? `${Math.round((stats.completed / stats.totalFiltered) * 100)}% complete` : 'None yet'}
+          trend={stats.completed > 0 ? 'up' : 'down'}
+          color="green"
+          icon={
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        
+        <StatCard
+          title="Team Members"
+          value={stats.detailers}
+          change={`${stats.detailers} active detailers`}
+          color="purple"
+          icon={
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+          }
+        />
       </div>
+
+      {/* 📊 Performance Analytics Dashboard */}
+      {stats.averageTimeToday && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <GlassCard className="p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Average Completion Time
+            </h3>
+            <div className="flex items-center justify-around">
+              <div className="text-center">
+                <div className="text-3xl font-bold text-blue-600">{stats.averageTimeToday || 'N/A'}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Today</div>
+              </div>
+              {stats.averageTimeWeek && (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-purple-600">{stats.averageTimeWeek}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">This Week</div>
+                </div>
+              )}
+            </div>
+          </GlassCard>
+
+          {stats.efficiency && (
+            <GlassCard className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+                Team Efficiency
+              </h3>
+              <div className="flex items-center justify-center">
+                <ProgressRing 
+                  progress={stats.efficiency} 
+                  size={140} 
+                  color="#10b981"
+                  label="Efficiency"
+                />
+              </div>
+            </GlassCard>
+          )}
+        </div>
+      )}
 
       {/* Active Jobs with Live Timers */}
       <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">

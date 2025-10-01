@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { connect } from 'react-redux';
 import { registerUser } from '../../actions/authActions';
-import { withRouter } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
-const Register = ({ registerUser, history, errors }) => {
+const Register = ({ registerUser, errors }) => {
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         username: '',
         password: '',
@@ -21,7 +22,7 @@ const Register = ({ registerUser, history, errors }) => {
             console.log('Passwords do not match');
         } else {
             const newUser = { username, password, role };
-            registerUser(newUser, history);
+            registerUser(newUser, navigate);
         }
     };
 
@@ -78,4 +79,4 @@ const mapStateToProps = state => ({
     errors: state.errors
 });
 
-export default connect(mapStateToProps, { registerUser })(withRouter(Register));
+export default connect(mapStateToProps, { registerUser })(Register);

@@ -1,12 +1,18 @@
 import React from 'react';
 import FirebaseV2 from './pages/FirebaseV2';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 import './App.css';
 
 function App() {
   return (
-    <div className="App">
-      <FirebaseV2 />
-    </div>
+    <ErrorBoundary>
+      <ToastProvider>
+        <div className="App">
+          <FirebaseV2 />
+        </div>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

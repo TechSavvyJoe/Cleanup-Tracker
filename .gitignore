@@ -1,23 +1,58 @@
-# Node
+# Dependencies
 node_modules/
 npm-debug.log*
-pnpm-lock.yaml
-package-lock.json
+yarn-debug.log*
+yarn-error.log*
 
-# Builds
-cleanup-tracker-app/client/build/
+# Production
+build/
+dist/
+.next/
 
-# Env files
-cleanup-tracker-app/server/.env
-cleanup-tracker-app/client/.env
-
-# Misc
-.DS_Store
+# Environment variables
 .env
-.idea/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+!.env.production
+
+# Debug files
+.port
+server.pid
+*.log
+server.log
+
+# IDE
 .vscode/
-# Cache
-*.eslintcache
-cleanup-tracker-app/client/node_modules/.cache/
-deploy/
-deploy-temp/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# PM2
+.pm2/
+ecosystem.config.js
+
+# MongoDB
+data/db/
+*.mdb
+
+# Wrangler
+.wrangler/
+.dev.vars
+
+# Build artifacts
+*.tsbuildinfo

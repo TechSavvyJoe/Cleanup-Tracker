@@ -5,12 +5,12 @@ import {
 } from './types';
 import axios from 'axios';
 import setAuthToken from '../utils/setAuthToken';
-import jwt_decode from 'jwt-decode';
+import { jwtDecode } from 'jwt-decode';
 
-export const registerUser = (userData, history) => dispatch => {
+export const registerUser = (userData, navigate) => dispatch => {
   axios
     .post('/api/users/register', userData)
-    .then(res => history.push('/login'))
+    .then(res => navigate('/login'))
     .catch(err =>
       dispatch({
         type: GET_ERRORS,
@@ -19,16 +19,16 @@ export const registerUser = (userData, history) => dispatch => {
     );
 };
 
-export const loginUser = (userData, history) => dispatch => {
+export const loginUser = (userData, navigate) => dispatch => {
   axios
     .post('/api/users/login', userData)
     .then(res => {
       const { token } = res.data;
       localStorage.setItem('jwtToken', token);
       setAuthToken(token);
-      const decoded = jwt_decode(token);
+      const decoded = jwtDecode(token);
       dispatch(setCurrentUser(decoded));
-      history.push('/dashboard');
+      navigate('/dashboard');
     })
     .catch(err =>
       dispatch({
