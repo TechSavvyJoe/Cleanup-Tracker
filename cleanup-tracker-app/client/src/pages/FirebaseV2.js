@@ -279,8 +279,8 @@ function LoginForm({ onLogin }) {
     })();
   }, []);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = useCallback(async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     setIsLoading(true);
     try {
       if (!employeeId) {
@@ -295,102 +295,246 @@ function LoginForm({ onLogin }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [employeeId, onLogin]);
+
+  // Add keyboard support for number entry
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (isLoading) return;
+      
+      // Number keys (0-9)
+      if (e.key >= '0' && e.key <= '9') {
+        if (employeeId.length < 4) {
+          setEmployeeId(prev => prev + e.key);
+        }
+      }
+      // Backspace or Delete
+      else if (e.key === 'Backspace' || e.key === 'Delete') {
+        setEmployeeId(prev => prev.slice(0, -1));
+      }
+      // Escape to clear
+      else if (e.key === 'Escape') {
+        setEmployeeId('');
+      }
+      // Enter to submit
+      else if (e.key === 'Enter' && employeeId.length === 4) {
+        handleSubmit();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [employeeId, isLoading, handleSubmit]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4">
-      {/* Modern Apple-style login card */}
-      <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/30 p-10 w-full max-w-md transform transition-all duration-300 hover:shadow-3xl">
-        {/* Logo and branding */}
-        <div className="text-center mb-10">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg">
-            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{siteTitle}</h1>
-          <p className="text-gray-600 font-medium">Mission Ford of Dearborn</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="relative">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Employee PIN</label>
-            <div className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-4 px-6 mb-4">
-              <div className="text-center">
-                <div className="text-3xl font-mono text-gray-900 tracking-widest min-h-[40px] flex items-center justify-center">
-                  {employeeId.replace(/./g, '●') || 'Enter PIN'}
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-gray-50 to-indigo-50 p-4">
+      {/* Responsive Login Container - Vertical on Mobile, Horizontal on Desktop */}
+      <div className="w-full max-w-7xl">
+        <div className="flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12">
+          
+          {/* Left Side: Branding (Hidden on mobile, shown on desktop) */}
+          <div className="hidden lg:block flex-1 max-w-md">
+            <div className="text-left space-y-6">
+              <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl">
+                <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-5xl font-bold text-gray-900 mb-4">{siteTitle}</h1>
+                <p className="text-xl text-gray-600 font-medium mb-6">Mission Ford of Dearborn</p>
+                <p className="text-gray-500 text-lg leading-relaxed">
+                  Professional vehicle detailing management system for detailers, sales team, and management.
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>Real-time Tracking</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span>Secure Access</span>
                 </div>
               </div>
             </div>
-            
-            {/* Number Pad */}
-            <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+          </div>
+
+          {/* Right Side: Login Card */}
+          <div className="w-full lg:flex-1 max-w-md">
+            <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 p-8 md:p-10 transform transition-all duration-300 hover:shadow-3xl">
+              
+              {/* Mobile-only branding (shown on mobile, hidden on desktop) */}
+              <div className="text-center mb-8 lg:hidden">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">{siteTitle}</h2>
+                <p className="text-sm text-gray-600 font-medium">Mission Ford of Dearborn</p>
+              </div>
+
+              {/* Desktop-only header */}
+              <div className="hidden lg:block text-center mb-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
+                <p className="text-gray-600">Enter your 4-digit PIN to continue</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="relative">
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">Employee PIN</label>
+                  
+                  {/* PIN Display */}
+                  <div className="w-full bg-gradient-to-br from-gray-50 to-gray-100 border-2 border-gray-200 rounded-2xl py-5 px-6 mb-6 shadow-inner">
+                    <div className="text-center">
+                      <div className="text-4xl font-mono text-gray-900 tracking-[0.5em] min-h-[48px] flex items-center justify-center">
+                        {employeeId.replace(/./g, '●') || <span className="text-gray-400 text-xl tracking-normal">Enter PIN</span>}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Number Pad - Classic Calculator Style (3x4 Grid) */}
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem'}} className="max-w-sm mx-auto">
+                    {/* Row 1: 1, 2, 3 */}
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '1'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '2'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      2
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '3'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      3
+                    </button>
+
+                    {/* Row 2: 4, 5, 6 */}
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '4'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      4
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '5'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      5
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '6'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      6
+                    </button>
+
+                    {/* Row 3: 7, 8, 9 */}
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '7'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      7
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '8'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      8
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '9'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      9
+                    </button>
+
+                    {/* Row 4: Clear, 0, Backspace */}
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeId('')}
+                      className="bg-red-50 hover:bg-red-100 border-2 border-red-200 hover:border-red-400 rounded-xl py-4 px-6 text-base font-bold text-red-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '0'); }}
+                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      0
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeId(employeeId.slice(0, -1))}
+                      className="bg-yellow-50 hover:bg-yellow-100 border-2 border-yellow-200 hover:border-yellow-400 rounded-xl py-4 px-6 text-xl font-bold text-yellow-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      ⌫
+                    </button>
+                  </div>
+
+                  {/* Keyboard hint for desktop */}
+                  <p className="hidden md:block text-xs text-gray-500 text-center mt-4">
+                    💡 Tip: You can also use your keyboard to enter the PIN
+                  </p>
+                </div>
+
                 <button
-                  key={num}
-                  type="button"
-                  onClick={() => {
-                    if (employeeId.length < 4) {
-                      setEmployeeId(employeeId + num.toString());
-                    }
-                  }}
-                  className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-300 rounded-xl py-4 px-6 text-2xl font-semibold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
+                  type="submit"
+                  disabled={isLoading || employeeId.length !== 4}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg"
                 >
-                  {num}
+                  {isLoading ? (
+                    <div className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Signing In...
+                    </div>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <span>Sign In</span>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </span>
+                  )}
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setEmployeeId('')}
-                className="bg-red-50 hover:bg-red-100 border-2 border-red-200 hover:border-red-300 rounded-xl py-4 px-6 text-lg font-semibold text-red-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (employeeId.length < 4) {
-                    setEmployeeId(employeeId + '0');
-                  }
-                }}
-                className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-300 rounded-xl py-4 px-6 text-2xl font-semibold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-              >
-                0
-              </button>
-              <button
-                type="button"
-                onClick={() => setEmployeeId(employeeId.slice(0, -1))}
-                className="bg-yellow-50 hover:bg-yellow-100 border-2 border-yellow-200 hover:border-yellow-300 rounded-xl py-4 px-6 text-lg font-semibold text-yellow-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-              >
-                ⌫
-              </button>
+                
+                <div className="text-center mt-6">
+                  <div className="flex items-center justify-center gap-4 text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      Secure Login
+                    </span>
+                    <span>•</span>
+                    <span>Detailers • Sales • Management</span>
+                  </div>
+                </div>
+              </form>
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-4 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] disabled:opacity-50 disabled:transform-none"
-          >
-            {isLoading ? (
-              <div className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Signing In...
-              </div>
-            ) : (
-              'Sign In'
-            )}
-          </button>
-          
-          <div className="text-center mt-6">
-            <p className="text-xs text-gray-500">
-              Detailers • Sales • Management
-            </p>
-          </div>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -1823,23 +1967,23 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
             </div>
           )}
 
-          {/* Filters */}
-          <div className="mb-6 flex flex-wrap gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Date</label>
+          {/* Filters - Compact */}
+          <div className="mb-4 flex flex-wrap gap-3 items-end">
+            <div className="w-40">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
               <input
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="bg-gray-50 border border-gray-300 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                className="w-full bg-white border border-gray-300 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Service</label>
+            <div className="w-44">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Service Type</label>
               <select
                 value={filterServiceType}
                 onChange={(e) => setFilterServiceType(e.target.value)}
-                className="bg-gray-50 border border-gray-300 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                className="w-full bg-white border border-gray-300 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">All Services</option>
                 <option value="Detail">Detail</option>
@@ -1852,17 +1996,15 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               </select>
             </div>
             {(filterDate || filterServiceType) && (
-              <div className="flex items-end">
-                <button
-                  onClick={() => {
-                    setFilterDate('');
-                    setFilterServiceType('');
-                  }}
-                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition-colors"
-                >
-                  Clear Filters
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setFilterDate('');
+                  setFilterServiceType('');
+                }}
+                className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+              >
+                Clear
+              </button>
             )}
           </div>
           
@@ -2028,26 +2170,27 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               )}
             
             {jobDetails && (
-              <div className="space-y-6">
-                {/* Vehicle & Job Information */}
-                <div className="bg-white rounded-lg p-6 border border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <h5 className="text-gray-900 font-medium mb-3">Vehicle Information</h5>
-                      <p className="text-gray-900 font-medium text-xl mb-2">{selectedJob.vehicleDescription}</p>
-                      <div className="space-y-2">
-                        <p className="text-gray-600 text-sm">VIN: <span className="font-mono text-gray-900">{jobDetails.job?.vin}</span></p>
-                        <p className="text-gray-600 text-sm">Stock Number: <span className="text-gray-900">{jobDetails.job?.stockNumber}</span></p>
-                        {jobDetails.job?.color && (
-                          <p className="text-gray-600 text-sm">Color: <span className="text-gray-900 font-medium">{jobDetails.job.color}</span></p>
-                        )}
-                        <p className="text-gray-600 text-sm">Service Type: <span className="text-blue-700 font-medium">{jobDetails.job?.serviceType}</span></p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-600 text-sm">Priority:</span>
+              <div className="space-y-4">
+                {/* Compact Vehicle & Job Information */}
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <h5 className="text-blue-900 font-semibold mb-2 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Vehicle Details
+                      </h5>
+                      <p className="text-gray-900 font-bold text-lg mb-2">{selectedJob.vehicleDescription}</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                        <div className="flex items-center gap-1"><span className="text-gray-600">VIN:</span><span className="font-mono text-gray-900 text-xs">{jobDetails.job?.vin}</span></div>
+                        <div className="flex items-center gap-1"><span className="text-gray-600">Stock:</span><span className="text-gray-900 font-medium">{jobDetails.job?.stockNumber}</span></div>
+                        {jobDetails.job?.color && <div className="flex items-center gap-1"><span className="text-gray-600">Color:</span><span className="text-gray-900 font-medium">{jobDetails.job.color}</span></div>}
+                        <div className="flex items-center gap-1"><span className="text-gray-600">Service:</span><span className="text-blue-700 font-bold">{jobDetails.job?.serviceType}</span></div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-600">Priority:</span>
                           <select 
                             value={jobDetails.job?.priority || 'Normal'} 
                             onChange={(e) => handlePriorityChange(e.target.value)}
-                            className="bg-gray-50 text-gray-900 border border-gray-300 rounded px-2 py-1 text-sm"
+                            className="bg-white text-gray-900 border border-gray-300 rounded px-1.5 py-0.5 text-xs font-medium"
                           >
                             <option value="Low">Low</option>
                             <option value="Normal">Normal</option>
@@ -2055,47 +2198,49 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                             <option value="Urgent">Urgent</option>
                           </select>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-600 text-sm">Sales Person:</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-600">Salesperson:</span>
                           <input 
                             type="text"
                             value={jobDetails.job?.salesPerson || ''}
                             onChange={(e) => handleSalesPersonChange(e.target.value)}
-                            placeholder="Enter sales person name"
-                            className="bg-gray-50 text-gray-900 border border-gray-300 rounded px-2 py-1 text-sm flex-1"
+                            placeholder="Name"
+                            className="bg-white text-gray-900 border border-gray-300 rounded px-1.5 py-0.5 text-xs flex-1"
                           />
                         </div>
                       </div>
                     </div>
-                    <div>
-                      <h5 className="text-gray-900 font-medium mb-3">My Performance</h5>
-                      <p className={`text-lg font-medium mb-2 ${
-                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-600' : 'text-green-600'
+                    <div className="bg-white rounded-lg p-3 border border-blue-200">
+                      <h5 className="text-gray-900 font-semibold mb-2 text-sm flex items-center gap-1">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Timing
+                      </h5>
+                      <div className={`text-sm font-bold mb-2 ${
+                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-700' : 'text-green-700'
                       }`}>
-                        Status: {jobDetails.job?.status}
-                      </p>
+                        {jobDetails.job?.status}
+                      </div>
                       {jobDetails.job?.startTime && (
-                        <div className="space-y-2">
-                          <p className="text-gray-600 text-sm">
-                            Started: {new Date(jobDetails.job.startTime).toLocaleString()}
-                          </p>
+                        <div className="space-y-1 text-xs">
+                          <p className="text-gray-600">Started: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.startTime).toLocaleTimeString()}</span></p>
                           {jobDetails.job?.status === 'In Progress' && (
                             <div>
-                              <p className="text-gray-600 text-sm">Working for:</p>
-                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-700 font-mono text-2xl" />
+                              <p className="text-gray-600 mb-1">Duration:</p>
+                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-700 font-mono text-xl font-bold" />
                             </div>
                           )}
                           {jobDetails.job?.completedAt && (
                             <div>
-                              <p className="text-gray-600 text-sm">
-                                Completed: {DateUtils.formatDate(jobDetails.job.completedAt)}
-                              </p>
-                              <p className="text-green-700 text-lg font-medium">
-                                Total Time: {DateUtils.formatDuration(
+                              <p className="text-gray-600">Completed: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.completedAt).toLocaleTimeString()}</span></p>
+                              <p className="text-green-700 text-base font-bold mt-1">
+                                {DateUtils.formatDuration(
                                   DateUtils.calculateDuration(jobDetails.job.startTime, jobDetails.job.completedAt)
                                 )}
                               </p>
                             </div>
+                          )}
+                          {jobDetails.job?.technicianName && (
+                            <p className="text-gray-600 pt-1 border-t border-gray-200">Tech: <span className="text-gray-900 font-medium">{jobDetails.job.technicianName}</span></p>
                           )}
                         </div>
                       )}
@@ -2103,50 +2248,47 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                   </div>
                 </div>
 
-                {/* Job Timeline */}
-                <div className="bg-white rounded-lg p-4 border border-gray-200">
-                  <h5 className="text-gray-900 font-medium mb-3">Job Timeline</h5>
-                  <ul className="space-y-3 max-h-48 overflow-auto pr-2">
-                    {/* Job Started Event */}
+                {/* Compact Activity Timeline */}
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  <h5 className="text-gray-900 font-semibold mb-2 text-sm flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                    Activity Timeline
+                  </h5>
+                  <ul className="space-y-2 max-h-36 overflow-auto pr-1">
                     {jobDetails.job?.startTime && (
-                      <li className="text-gray-600 text-sm border-l-2 border-green-500 pl-3">
-                        <span className="text-green-700 font-medium">Job Started</span>
-                        <span className="text-gray-500 block text-xs mt-1">
+                      <li className="text-xs border-l-2 border-green-500 pl-2 py-1">
+                        <span className="text-green-700 font-semibold">Started</span>
+                        <span className="text-gray-500 block text-[11px]">
                           {DateUtils.formatDateTime(jobDetails.job.startTime)}
                           {jobDetails.job?.technicianName && ` • ${jobDetails.job.technicianName}`}
                         </span>
                       </li>
                     )}
-                    
-                    {/* Job Completed Event */}
                     {jobDetails.job?.completedAt && (
-                      <li className="text-gray-600 text-sm border-l-2 border-blue-500 pl-3">
-                        <span className="text-blue-700 font-medium">Job Completed</span>
-                        <span className="text-gray-500 block text-xs mt-1">
+                      <li className="text-xs border-l-2 border-blue-500 pl-2 py-1">
+                        <span className="text-blue-700 font-semibold">Completed</span>
+                        <span className="text-gray-500 block text-[11px]">
                           {DateUtils.formatDateTime(jobDetails.job.completedAt)}
-                          {jobDetails.job?.duration && ` • Duration: ${DateUtils.formatDuration(jobDetails.job.duration)}`}
+                          {jobDetails.job?.duration && ` • ${DateUtils.formatDuration(jobDetails.job.duration)}`}
                         </span>
                       </li>
                     )}
-                    
-                    {/* Other Timeline Events */}
                     {(jobDetails.events || []).map((ev, idx) => {
                       const validDate = DateUtils.getValidDate(ev.timestamp || ev.at);
                       return (
-                        <li key={idx} className="text-gray-600 text-sm border-l-2 border-gray-400 pl-3">
-                          <span className="text-gray-900 font-medium">
+                        <li key={idx} className="text-xs border-l-2 border-gray-400 pl-2 py-1">
+                          <span className="text-gray-900 font-semibold">
                             {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
                           </span>
-                          <span className="text-gray-500 block text-xs mt-1">
+                          <span className="text-gray-500 block text-[11px]">
                             {validDate ? DateUtils.formatDateTime(validDate) : 'Invalid Date'}
                             {ev.userName && ` • ${ev.userName}`}
                           </span>
                         </li>
                       );
                     })}
-                    
                     {(!jobDetails.job?.startTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
-                      <li className="text-gray-500 text-sm">No timeline events recorded</li>
+                      <li className="text-gray-500 text-xs italic">No activity recorded</li>
                     )}
                   </ul>
                 </div>
@@ -3119,23 +3261,23 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
         </div>
       </div>
 
-      {/* Job Details Modal */}
+      {/* Compact Job Details Modal */}
       {selectedJob && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-4xl border border-gray-200 max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-start mb-6">
+          <div className="bg-white rounded-xl p-4 w-full max-w-5xl border border-gray-200 max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <h4 className="text-gray-900 font-bold text-2xl">
+                <h4 className="text-gray-900 font-bold text-lg">
                   {selectedJob.year} {selectedJob.make} {selectedJob.model}
                 </h4>
-                <div className="flex gap-2 mt-2">
+                <div className="flex gap-1.5 mt-1.5">
                   {selectedJob.vehicleColor && (
-                    <span className="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full font-medium border border-blue-200">
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full font-medium border border-blue-200">
                       {selectedJob.vehicleColor}
                     </span>
                   )}
                   {selectedJob.priority && selectedJob.priority !== 'Normal' && (
-                    <span className={`px-3 py-1 rounded-full text-sm font-bold border ${
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${
                       selectedJob.priority === 'Urgent' ? 'bg-red-50 text-red-700 border-red-200' :
                       selectedJob.priority === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
                       selectedJob.priority === 'Low' ? 'bg-gray-50 text-gray-700 border-gray-200' :
@@ -3146,11 +3288,11 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                   )}
                 </div>
               </div>
-              <button onClick={closeJobDetails} className="text-gray-500 hover:text-gray-700 text-2xl">✕</button>
+              <button onClick={closeJobDetails} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
             </div>
 
-            {loading && <p className="text-gray-600 text-center py-8">Loading job details...</p>}
-            {error && <p className="text-red-700 text-center py-4 bg-red-50 rounded-lg border border-red-200">{error}</p>}
+            {loading && <p className="text-gray-600 text-center py-6 text-sm">Loading...</p>}
+            {error && <p className="text-red-700 text-center py-3 bg-red-50 rounded-lg border border-red-200 text-sm">{error}</p>}
             
             {jobDetails && (
               <div className="space-y-6">
@@ -3463,45 +3605,35 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h4 className="text-gray-900 font-medium">Filters</h4>
-          <button
-            onClick={clearFilters}
-            className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg border border-gray-300"
-          >
-            Clear All
-          </button>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">Start Date</label>
+      {/* Compact Filters */}
+      <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="w-36">
+            <label className="block text-gray-700 text-xs font-medium mb-1">Start Date</label>
             <input
               type="date"
               value={filters.startDate}
               onChange={e => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">End Date</label>
+          <div className="w-36">
+            <label className="block text-gray-700 text-xs font-medium mb-1">End Date</label>
             <input
               type="date"
               value={filters.endDate}
               onChange={e => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">Service Type</label>
+          <div className="w-40">
+            <label className="block text-gray-700 text-xs font-medium mb-1">Service Type</label>
             <select
               value={filters.serviceType}
               onChange={e => setFilters(prev => ({ ...prev, serviceType: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Types</option>
               {filterOptions.serviceTypes.map(type => (
@@ -3510,49 +3642,55 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
             </select>
           </div>
           
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">Vehicle Type</label>
+          <div className="w-32">
+            <label className="block text-gray-700 text-xs font-medium mb-1">Vehicle</label>
             <select
               value={filters.vehicleType}
               onChange={e => setFilters(prev => ({ ...prev, vehicleType: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">All Vehicles</option>
+              <option value="">All</option>
               <option value="new">New</option>
               <option value="used">Used</option>
             </select>
           </div>
           
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">Detailer</label>
+          <div className="w-40">
+            <label className="block text-gray-700 text-xs font-medium mb-1">Detailer</label>
             <select
               value={filters.detailer}
               onChange={e => setFilters(prev => ({ ...prev, detailer: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">All Detailers</option>
+              <option value="">All</option>
               {filterOptions.detailers.map(detailer => (
                 <option key={detailer.id} value={detailer.id}>{detailer.name}</option>
               ))}
             </select>
           </div>
           
-          <div>
-            <label className="block text-gray-700 text-xs mb-1">Status</label>
+          <div className="w-32\">\n            <label className="block text-gray-700 text-xs font-medium mb-1">Status</label>
             <select
               value={filters.status}
               onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
-              className="w-full bg-gray-50 text-gray-900 text-sm border border-gray-300 rounded py-2 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">All Status</option>
+              <option value="">All</option>
               {filterOptions.statuses.map(status => (
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
           </div>
+          
+          <button
+            onClick={clearFilters}
+            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg transition-colors"
+          >
+            Clear
+          </button>
         </div>
         
-        <div className="mt-3 text-sm text-gray-600">
+        <div className="mt-3 text-sm text-gray-700 font-medium">
           Showing {filteredJobs.length} of {jobs.length} jobs
         </div>
       </div>
@@ -3701,188 +3839,220 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Compact Job Details Modal */}
       {selectedJob && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl border border-gray-200 shadow-2xl">
-            <div className="flex justify-between items-start mb-4">
-              <h4 className="text-gray-900 font-semibold text-lg">Job Details</h4>
-              <button onClick={closeDetails} className="text-gray-500 hover:text-gray-700">✕</button>
+          <div className="bg-white rounded-xl p-4 w-full max-w-5xl border border-gray-200 max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h4 className="text-gray-900 font-bold text-lg">
+                  {selectedJob.year} {selectedJob.make} {selectedJob.model}
+                </h4>
+                {selectedJob.vehicleColor && (
+                  <span className="inline-block px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full font-medium border border-blue-200 mt-1">
+                    {selectedJob.vehicleColor}
+                  </span>
+                )}
+              </div>
+              <button onClick={closeDetails} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
             </div>
-            {loading && <p className="text-gray-600">Loading…</p>}
-            {error && <p className="text-red-700">{error}</p>}
+            {loading && <p className="text-gray-600 text-center py-6 text-sm">Loading details...</p>}
+            {error && <p className="text-red-700 text-center py-3 bg-red-50 rounded-lg border border-red-200 text-sm">{error}</p>}
+            
             {jobDetails && (
               <div className="space-y-4">
-                <div className="bg-white rounded-lg p-4 border border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <h5 className="text-gray-900 font-medium mb-2">Vehicle Information</h5>
-                      <p className="text-gray-900 font-medium text-lg">{selectedJob.vehicleDescription}</p>
-                      <p className="text-gray-600 text-sm">VIN: {jobDetails.job?.vin}</p>
-                      <p className="text-gray-600 text-sm">Stock Number: {jobDetails.job?.stockNumber}</p>
-                      <p className="text-gray-600 text-sm">Service Type: {jobDetails.job?.serviceType}</p>
+                {/* Compact 3-Column Details Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Vehicle Info</h5>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Vehicle:</span>
+                        <span className="text-gray-900 font-medium text-right">{selectedJob.vehicleDescription || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Stock:</span>
+                        <span className="text-gray-900 font-medium">{jobDetails.job?.stockNumber || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">VIN:</span>
+                        <span className="text-gray-900 font-mono text-xs">{jobDetails.job?.vin?.slice(0,10) || 'N/A'}...</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Service:</span>
+                        <span className="text-blue-700 font-medium">{jobDetails.job?.serviceType || 'N/A'}</span>
+                      </div>
                       {jobDetails.job?.salesPerson && (
-                        <p className="text-blue-700 text-sm">Sales Person: {jobDetails.job.salesPerson}</p>
-                      )}
-                    </div>
-                    <div>
-                      <h5 className="text-white font-medium mb-2">Job Status & Timing</h5>
-                      <p className={`text-sm font-medium ${
-                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-400' : 'text-green-400'
-                      }`}>
-                        Status: {jobDetails.job?.status}
-                      </p>
-                      {jobDetails.job?.startTime && (
-                        <div className="space-y-1">
-                          <p className="text-gray-600 text-sm">
-                            Started: {new Date(jobDetails.job.startTime).toLocaleString()}
-                          </p>
-                          {jobDetails.job?.status === 'In Progress' && (
-                            <div>
-                              <p className="text-gray-600 text-sm">Current Duration:</p>
-                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-700 font-mono text-xl" />
-                            </div>
-                          )}
-                          {jobDetails.job?.completedAt && (
-                            <p className="text-gray-600 text-sm">
-                              Completed: {new Date(jobDetails.job.completedAt).toLocaleString()}
-                            </p>
-                          )}
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Sales:</span>
+                          <span className="text-green-700 font-medium text-xs">{jobDetails.job.salesPerson}</span>
                         </div>
                       )}
-                      <p className="text-gray-400 text-xs mt-2">Created: {jobDetails.job?.date}</p>
                     </div>
                   </div>
-                  {jobDetails.job?.status !== 'completed' && (
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={async () => { 
-                          try { 
-                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                            if (!jobId) return alert('Job ID not found');
-                            await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id }); 
-                            await onRefresh?.(); 
-                            closeDetails(); 
-                            alert('Timer stopped');
-                          } catch (e) { 
-                            alert('Stop failed: ' + (e.response?.data?.error || e.message)); 
-                          } 
-                        }}
-                        className="px-3 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-white text-sm"
-                      >
-                        Stop Timer
-                      </button>
-                      <button
-                        onClick={async () => { 
-                          try { 
-                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                            if (!jobId) return alert('Job ID not found');
-                            await V2.put(`/jobs/${jobId}/complete`, { 
-                              userId: currentUser?.id,
-                              completedAt: new Date().toISOString()
-                            }); 
-                            await onRefresh?.(); 
-                            closeDetails(); 
-                            alert('Job marked complete');
-                          } catch (e) { 
-                            alert('Complete failed: ' + (e.response?.data?.error || e.message)); 
-                          } 
-                        }}
-                        className="px-3 py-2 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
-                      >
-                        Mark Complete
-                      </button>
-                      <button
-                        onClick={async () => { 
-                          try { 
-                            const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                            if (!jobId) return alert('Job ID not found');
-                            await V2.put(`/jobs/${jobId}/join`, { userId: currentUser?.id }); 
-                            await onRefresh?.(); 
-                            alert('Assigned to you'); 
-                          } catch (e) { 
-                            alert('Assign failed: ' + (e.response?.data?.error || e.message)); 
-                          } 
-                        }}
-                        className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
-                      >
-                        Assign Me
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-white rounded-lg p-4 border border-gray-200">
-                    <h5 className="text-gray-900 font-medium mb-2">Technicians</h5>
-                    <ul className="space-y-1">
-                      {(jobDetails.technicians || []).map(t => (
-                        <li key={t.userId} className="text-gray-600 text-sm">• {t.userName || t.name || t.userId}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="bg-white rounded-lg p-4 border border-gray-200">
-                    <h5 className="text-gray-900 font-medium mb-3">Activity Timeline</h5>
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
-                      {/* Job Started Event */}
-                      {jobDetails.job?.startTime && (
-                        <div className="flex items-center gap-3 py-2">
-                          <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">Job Started</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(jobDetails.job.startTime).toLocaleTimeString()} • {jobDetails.job?.technicianName || 'Technician'}
-                            </p>
-                          </div>
+                  
+                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Timing & Status</h5>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Status:</span>
+                        <span className={`font-medium ${
+                          jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress'
+                            ? 'text-yellow-700' 
+                            : jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed'
+                            ? 'text-green-700'
+                            : 'text-gray-700'
+                        }`}>
+                          {jobDetails.job?.status === 'in_progress' ? 'In Progress' : 
+                           jobDetails.job?.status === 'completed' ? 'Completed' : 
+                           jobDetails.job?.status || 'Unknown'}
+                        </span>
+                      </div>
+                      
+                      {jobDetails.job?.date && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Created:</span>
+                          <span className="text-gray-700">{DateUtils.formatDate(jobDetails.job.date)}</span>
                         </div>
                       )}
                       
-                      {/* Job Completed Event */}
+                      {(jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Started:</span>
+                          <span className="text-green-700">{DateUtils.formatTime(jobDetails.job.startTime || jobDetails.job.startedAt)}</span>
+                        </div>
+                      )}
+                      
                       {jobDetails.job?.completedAt && (
-                        <div className="flex items-center gap-3 py-2">
-                          <div className="w-3 h-3 bg-blue-500 rounded-full flex-shrink-0"></div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">Job Completed</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(jobDetails.job.completedAt).toLocaleTimeString()}
-                              {jobDetails.job?.duration && ` • ${DateUtils.formatDuration(jobDetails.job.duration)}`}
-                            </p>
-                          </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Completed:</span>
+                          <span className="text-green-700">{DateUtils.formatTime(jobDetails.job.completedAt)}</span>
                         </div>
                       )}
                       
-                      {/* QC Status Events */}
-                      {jobDetails.job?.status === 'QC Required' && (
-                        <div className="flex items-center gap-3 py-2">
-                          <div className="w-3 h-3 bg-yellow-500 rounded-full flex-shrink-0"></div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">QC Review Required</p>
-                            <p className="text-xs text-gray-500">Waiting for quality control inspection</p>
-                          </div>
+                      {/* Live Timer or Duration */}
+                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') && 
+                       (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                        <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-200">
+                          <p className="text-gray-600 text-xs mb-0.5">Duration:</p>
+                          <LiveTimer 
+                            startTime={jobDetails.job.startTime || jobDetails.job.startedAt} 
+                            className="text-yellow-700 font-mono text-base font-bold" 
+                          />
                         </div>
                       )}
                       
-                      {/* Condensed Other Events */}
-                      {(jobDetails.events || []).slice(0, 2).map((ev, idx) => {
-                        return (
-                          <div key={idx} className="flex items-center gap-3 py-1">
-                            <div className="w-2 h-2 bg-gray-400 rounded-full flex-shrink-0"></div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs text-gray-700 truncate">
-                                {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      
-                      {(!jobDetails.job?.startTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
-                        <div className="text-center py-4">
-                          <p className="text-gray-500 text-sm">No timeline events recorded</p>
+                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') && 
+                       jobDetails.job?.completedAt && (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                        <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                          <p className="text-gray-600 text-xs mb-0.5">Total:</p>
+                          <p className="text-green-700 font-mono text-base font-bold">
+                            {DateUtils.formatDuration(
+                              DateUtils.calculateDuration(
+                                jobDetails.job.startTime || jobDetails.job.startedAt, 
+                                jobDetails.job.completedAt
+                              )
+                            )}
+                          </p>
                         </div>
                       )}
                     </div>
                   </div>
+                  
+                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Team & Activity</h5>
+                    <div className="space-y-2 text-xs">
+                      {(jobDetails.technicians || []).length > 0 && (
+                        <div>
+                          <p className="text-gray-600 mb-1">Technicians:</p>
+                          <div className="space-y-0.5">
+                            {(jobDetails.technicians || []).map(t => (
+                              <p key={t.userId} className="text-gray-900 font-medium">• {t.userName || t.name || t.userId}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {(jobDetails.events || []).length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-gray-600 mb-1">Recent Events:</p>
+                          <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                            {(jobDetails.events || []).slice(0, 4).map((ev, idx) => (
+                              <p key={idx} className="text-gray-700 text-xs">
+                                • {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {(!jobDetails.technicians || jobDetails.technicians.length === 0) && 
+                       (!jobDetails.events || jobDetails.events.length === 0) && (
+                        <p className="text-gray-500 text-center py-4">No activity</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
+
+                {/* Compact Action Buttons */}
+                {jobDetails.job?.status !== 'completed' && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={async () => { 
+                        try { 
+                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                          if (!jobId) return alert('Job ID not found');
+                          await V2.put(`/jobs/${jobId}/start`, { userId: currentUser?.id }); 
+                          await onRefresh?.(); 
+                          closeDetails(); 
+                          alert('Timer started');
+                        } catch (e) { 
+                          alert('Start failed: ' + (e.response?.data?.error || e.message)); 
+                        } 
+                      }}
+                      className="px-3 py-1.5 rounded bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
+                    >
+                      Start Timer
+                    </button>
+                    <button
+                      onClick={async () => { 
+                        try { 
+                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                          if (!jobId) return alert('Job ID not found');
+                          await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id }); 
+                          await onRefresh?.(); 
+                          closeDetails(); 
+                          alert('Timer stopped');
+                        } catch (e) { 
+                          alert('Stop failed: ' + (e.response?.data?.error || e.message)); 
+                        } 
+                      }}
+                      className="px-3 py-1.5 rounded bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-medium transition-colors"
+                    >
+                      Stop Timer
+                    </button>
+                    <button
+                      onClick={async () => { 
+                        try { 
+                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
+                          if (!jobId) return alert('Job ID not found');
+                          await V2.put(`/jobs/${jobId}/complete`, { 
+                            userId: currentUser?.id,
+                            completedAt: new Date().toISOString()
+                          }); 
+                          await onRefresh?.(); 
+                          closeDetails(); 
+                          alert('Job marked complete');
+                        } catch (e) { 
+                          alert('Complete failed: ' + (e.response?.data?.error || e.message)); 
+                        } 
+                      }}
+                      className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+                    >
+                      Mark Complete
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3915,6 +4085,8 @@ function UsersView({ users, detailers, onDeleteUser }) {
       });
       setNewUser({ name: '', pin: '', role: 'detailer', phone: '' });
       alert('User added successfully');
+      // FIXED: Reload users to show new team member
+      window.location.reload();
     } catch (err) {
       alert('Failed to add user: ' + (err.response?.data?.error || err.message));
     } finally {
@@ -4022,6 +4194,9 @@ function UsersView({ users, detailers, onDeleteUser }) {
 }
 
 // Enhanced Reports View Component with Interactive Analytics
+// DEPRECATED: This component has been replaced by EnhancedReports.js
+// Keeping for reference only
+/* eslint-disable no-unused-vars */
 function ReportsView({ jobs = [], users = {} }) {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');

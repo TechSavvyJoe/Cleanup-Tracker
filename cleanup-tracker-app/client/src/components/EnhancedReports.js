@@ -62,35 +62,30 @@ const EnhancedReports = ({ jobs, users, theme }) => {
     });
   }, [jobs, dateRange, filters]);
 
-  // Calculate metrics
+  // Calculate metrics - focused on time tracking and efficiency
   const metrics = useMemo(() => {
     const total = filteredJobs.length;
-    const completed = filteredJobs.filter(j => j.status === 'complete').length;
-    const inProgress = filteredJobs.filter(j => j.status === 'in-progress').length;
-    const pending = filteredJobs.filter(j => j.status === 'pending').length;
+    const completed = filteredJobs.filter(j => j.status === 'complete' || j.status === 'completed').length;
+    const inProgress = filteredJobs.filter(j => j.status === 'in-progress' || j.status === 'In Progress').length;
+    const pending = filteredJobs.filter(j => j.status === 'pending' || j.status === 'Pending').length;
     
-    const completionRate = total > 0 ? ((completed / total) * 100).toFixed(1) : 0;
+    // Calculate average time per job (only for completed jobs with duration)
+    const completedWithDuration = filteredJobs.filter(j => 
+      (j.status === 'complete' || j.status === 'completed') && j.duration
+    );
+    const totalDuration = completedWithDuration.reduce((acc, job) => acc + (job.duration || 0), 0);
+    const avgTime = completedWithDuration.length > 0 ? Math.round(totalDuration / completedWithDuration.length) : 0;
     
-    // Calculate average time (mock data for demonstration)
-    const avgTime = filteredJobs.reduce((acc, job) => {
-      const duration = job.duration || Math.random() * 120;
-      return acc + duration;
-    }, 0) / (filteredJobs.length || 1);
-    
-    // Revenue calculation (mock)
-    const revenue = filteredJobs.reduce((acc, job) => {
-      const jobRevenue = job.revenue || (Math.random() * 500 + 200);
-      return acc + jobRevenue;
-    }, 0);
+    // Total minutes tracked across all jobs
+    const totalMinutes = filteredJobs.reduce((acc, job) => acc + (job.duration || 0), 0);
     
     return {
       total,
       completed,
       inProgress,
       pending,
-      completionRate,
-      avgTime: Math.round(avgTime),
-      revenue: Math.round(revenue),
+      avgTime,
+      totalMinutes,
     };
   }, [filteredJobs]);
 
@@ -114,14 +109,15 @@ const EnhancedReports = ({ jobs, users, theme }) => {
   };
 
   const exportToCSV = () => {
-    const headers = ['VIN', 'Status', 'Assigned To', 'Date', 'Duration', 'Revenue'];
+    const headers = ['VIN', 'Status', 'Service Type', 'Assigned To', 'Date', 'Duration (min)', 'Efficiency'];
     const rows = filteredJobs.map(job => [
       job.vin,
       job.status,
-      job.assignedTo || 'Unassigned',
-      new Date(job.timestamp || job.createdAt).toLocaleDateString(),
-      `${job.duration || 0} min`,
-      `$${(job.revenue || 0).toFixed(2)}`,
+      job.serviceType || 'N/A',
+      job.technicianName || job.assignedTo || 'N/A',
+      job.date ? new Date(job.date).toLocaleDateString() : 'N/A',
+      job.duration || 0,
+      job.duration && metrics.avgTime ? `${((job.duration / metrics.avgTime) * 100).toFixed(0)}%` : 'N/A',
     ]);
     
     const csvContent = [
@@ -373,7 +369,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
           >
             <option value="overview">Overview</option>
             <option value="performance">Performance</option>
-            <option value="revenue">Revenue</option>
+            <option value="efficiency">Efficiency</option>
             <option value="team">Team Analytics</option>
           </select>
         </div>
@@ -410,7 +406,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
           </div>
         </div>
 
-        {/* Completion Rate */}
+        {/* Average Time per Job */}
         <div style={{
           padding: '1.5rem',
           borderRadius: ModernTheme.borderRadius.xl,
@@ -423,31 +419,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
             color: currentTheme.text.secondary,
             marginBottom: '0.5rem',
           }}>
-            Completion Rate
-          </div>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize['3xl'],
-            fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: ModernTheme.colors.success[500],
-          }}>
-            {metrics.completionRate}%
-          </div>
-        </div>
-
-        {/* Average Time */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize.sm,
-            color: currentTheme.text.secondary,
-            marginBottom: '0.5rem',
-          }}>
-            Avg. Time
+            Avg. Job Time
           </div>
           <div style={{
             fontSize: ModernTheme.typography.fontSize['3xl'],
@@ -458,7 +430,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
           </div>
         </div>
 
-        {/* Revenue */}
+        {/* Total Time Tracked */}
         <div style={{
           padding: '1.5rem',
           borderRadius: ModernTheme.borderRadius.xl,
@@ -471,14 +443,14 @@ const EnhancedReports = ({ jobs, users, theme }) => {
             color: currentTheme.text.secondary,
             marginBottom: '0.5rem',
           }}>
-            Revenue
+            Total Hours Tracked
           </div>
           <div style={{
             fontSize: ModernTheme.typography.fontSize['3xl'],
             fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: ModernTheme.colors.success[600],
+            color: ModernTheme.colors.purple[500],
           }}>
-            ${metrics.revenue.toLocaleString()}
+            {(metrics.totalMinutes / 60).toFixed(1)}h
           </div>
         </div>
       </div>
