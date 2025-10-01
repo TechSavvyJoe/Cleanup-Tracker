@@ -2559,45 +2559,48 @@ function SalespersonDashboard({ user, jobs }) {
           
           <div className="space-y-4">
             {myJobs.map(job => (
-              <div key={job.id} className="bg-gray-50 rounded-2xl p-6 border border-gray-100 hover:shadow-lg transition-all duration-200">
-                <div className="flex justify-between items-start">
+              <div key={job.id} className="job-card bg-gray-50 rounded-2xl p-4 md:p-3 border border-gray-200 hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-gray-300">
+                <div className="flex justify-between items-start gap-3">
                   <div className="flex-1">
-                    <h4 className="text-lg font-bold text-gray-900 mb-2">
+                    <h4 className="text-base md:text-lg font-bold text-gray-900 mb-2 leading-tight">
                       {job.year} {job.make} {job.model} {job.vehicleColor && `• ${job.vehicleColor}`}
                     </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                    <div className="job-info-grid grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 text-xs md:text-sm mb-3">
                       <div>
-                        <p className="text-gray-500 font-medium">VIN</p>
-                        <p className="text-gray-900 font-mono">{job.vin?.slice(-6)}</p>
+                        <p className="text-gray-600 font-medium text-xs">VIN</p>
+                        <p className="text-gray-900 font-semibold font-mono text-xs">{job.vin?.slice(-6)}</p>
                       </div>
                       <div>
-                        <p className="text-gray-500 font-medium">Stock</p>
-                        <p className="text-gray-900">{job.stockNumber}</p>
+                        <p className="text-gray-600 font-medium text-xs">Stock</p>
+                        <p className="text-gray-900 font-semibold">{job.stockNumber}</p>
                       </div>
                       <div>
-                        <p className="text-gray-500 font-medium">Service</p>
-                        <p className="text-gray-900">{job.serviceType}</p>
+                        <p className="text-gray-600 font-medium text-xs">Service</p>
+                        <p className="text-blue-700 font-semibold">{job.serviceType}</p>
                       </div>
                       <div>
-                        <p className="text-gray-500 font-medium">Technician</p>
-                        <p className="text-gray-900">{job.technicianName}</p>
+                        <p className="text-gray-600 font-medium text-xs">Technician</p>
+                        <p className="text-gray-900 font-semibold">{job.technicianName}</p>
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                        job.status === 'Completed' ? 'bg-green-100 text-green-800' :
-                        job.status === 'In Progress' ? 'bg-blue-100 text-blue-800' :
-                        'bg-gray-100 text-gray-800'
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`status-badge px-2 md:px-3 py-1 rounded-full text-xs font-bold border ${
+                        job.status === 'Completed' ? 'status-completed' :
+                        job.status === 'In Progress' ? 'status-in-progress' :
+                        job.status === 'QC Required' ? 'status-qc-required' :
+                        job.status === 'Failed QC' ? 'status-failed-qc' :
+                        'status-pending'
                       }`}>
                         {job.status}
                       </span>
                       
                       {job.priority && job.priority !== 'Normal' && (
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                          job.priority === 'Urgent' ? 'bg-red-100 text-red-800' :
-                          job.priority === 'High' ? 'bg-orange-100 text-orange-800' :
-                          'bg-gray-100 text-gray-800'
+                        <span className={`px-2 md:px-3 py-1 rounded-full text-xs font-bold border ${
+                          job.priority === 'Urgent' ? 'priority-urgent' :
+                          job.priority === 'High' ? 'priority-high' :
+                          job.priority === 'Low' ? 'priority-low' :
+                          'priority-normal'
                         }`}>
                           {job.priority}
                         </span>
@@ -2605,29 +2608,29 @@ function SalespersonDashboard({ user, jobs }) {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col gap-2 ml-4">
+                  <div className="flex flex-col gap-1.5 ml-2">
                     {job.status === 'Completed' && !job.qcCompleted && (
-                      <div className="flex gap-2">
+                      <div className="flex gap-1.5">
                         <button
-                          onClick={() => handleQualityCheck(job.id, true)}
-                          className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-semibold rounded-xl transition-colors"
+                          onClick={(e) => { e.stopPropagation(); handleQualityCheck(job.id, true); }}
+                          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                         >
-                          ✓ Pass QC
+                          ✓ Pass
                         </button>
                         <button
-                          onClick={() => handleQualityCheck(job.id, false)}
-                          className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-xl transition-colors"
+                          onClick={(e) => { e.stopPropagation(); handleQualityCheck(job.id, false); }}
+                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                         >
-                          ✗ Fail QC
+                          ✗ Fail
                         </button>
                       </div>
                     )}
                     
                     <button
-                      onClick={() => handleMessage(job.id, 'detailer')}
-                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center gap-2"
+                      onClick={(e) => { e.stopPropagation(); handleMessage(job.id, 'detailer'); }}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm whitespace-nowrap"
                     >
-                      💬 Message Detailer
+                      💬 Message
                     </button>
                   </div>
                 </div>
@@ -3555,67 +3558,67 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
       </div>
 
       {/* Jobs List */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">All Jobs</h3>
-        <div className="space-y-4 max-h-96 overflow-y-auto">
+      <div className="bg-white rounded-xl p-4 md:p-6 border border-gray-200 shadow-sm">
+        <h3 className="text-gray-900 font-bold text-lg mb-3">All Jobs</h3>
+        <div className="job-list-container space-y-2 max-h-[600px] overflow-y-auto">
           {filteredJobs.length > 0 ? filteredJobs.map(job => (
             <div
               key={job.id || job._id}
-              className="bg-gray-50 rounded-lg p-5 border border-gray-200 hover:bg-gray-100 transition-colors cursor-pointer"
+              className="job-card bg-gray-50 rounded-lg p-3 md:p-2.5 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all cursor-pointer hover:shadow-md"
               onClick={() => openDetails(job)}
             >
               {/* Main Job Header */}
-              <div className="flex justify-between items-start mb-4">
+              <div className="flex justify-between items-start mb-2 gap-2">
                 <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h4 className="text-gray-900 font-bold text-xl">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <h4 className="text-gray-900 font-bold text-base leading-tight">
                       {job.year} {job.make} {job.model}
                     </h4>
                     {job.vehicleColor && (
-                      <span className="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full font-medium border border-blue-200">
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full font-semibold border border-blue-300">
                         {job.vehicleColor}
                       </span>
                     )}
                     {job.priority && job.priority !== 'Normal' && (
-                      <span className={`px-3 py-1 rounded-full text-sm font-bold border ${
-                        job.priority === 'Urgent' ? 'bg-red-50 text-red-700 border-red-200' :
-                        job.priority === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                        job.priority === 'Low' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                        'bg-yellow-50 text-yellow-700 border-yellow-200'
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${
+                        job.priority === 'Urgent' ? 'priority-urgent' :
+                        job.priority === 'High' ? 'priority-high' :
+                        job.priority === 'Low' ? 'priority-low' :
+                        'priority-normal'
                       }`}>
                         {job.priority}
                       </span>
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                  <div className="job-info-grid grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2 text-xs mb-2">
                     <div>
-                      <span className="text-gray-600">Stock:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.stockNumber || 'N/A'}</span>
+                      <span className="text-gray-600 font-medium">Stock:</span>
+                      <span className="text-gray-900 font-bold ml-1">{job.stockNumber || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">VIN:</span>
-                      <span className="font-mono text-gray-900 text-xs ml-2">{job.vin?.slice(-8) || 'N/A'}</span>
+                      <span className="text-gray-600 font-medium">VIN:</span>
+                      <span className="font-mono text-gray-900 font-bold text-xs ml-1">{job.vin?.slice(-8) || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">Service:</span>
-                      <span className="text-blue-700 font-medium ml-2">{job.serviceType || 'N/A'}</span>
+                      <span className="text-gray-600 font-medium">Service:</span>
+                      <span className="text-blue-700 font-bold ml-1">{job.serviceType || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">Detailer:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.technicianName || job.assignedTo || 'N/A'}</span>
+                      <span className="text-gray-600 font-medium">Detailer:</span>
+                      <span className="text-gray-900 font-bold ml-1">{job.technicianName || job.assignedTo || 'N/A'}</span>
                     </div>
                   </div>
 
                   {job.salesPerson && (
-                    <div className="mb-3">
-                      <span className="text-gray-600 text-sm">Sales Person:</span>
-                      <span className="text-green-700 font-medium text-sm ml-2">{job.salesPerson}</span>
+                    <div className="mb-2">
+                      <span className="text-gray-600 text-xs font-medium">Sales:</span>
+                      <span className="text-green-700 font-bold text-xs ml-1">{job.salesPerson}</span>
                     </div>
                   )}
 
                   {/* Timing Information */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                     {job.startTime || job.startedAt ? (
                       <div>
                         <span className="text-gray-600">Started:</span>
@@ -3644,17 +3647,21 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                 </div>
 
                 {/* Status and Duration */}
-                <div className="text-right ml-4 min-w-[120px]">
-                  <div className={`px-4 py-2 rounded-full text-sm font-bold border mb-3 ${
+                <div className="text-right ml-2 min-w-[100px]">
+                  <div className={`status-badge px-2 md:px-3 py-1 rounded-full text-xs font-bold border mb-2 ${
                     job.status === 'In Progress' || job.status === 'in_progress'
-                      ? 'bg-yellow-500/20 text-yellow-300 border-yellow-400/50' 
+                      ? 'status-in-progress' 
                       : job.status === 'Completed' || job.status === 'completed'
-                      ? 'bg-green-500/20 text-green-300 border-green-400/50'
-                      : 'bg-gray-500/20 text-gray-600 border-gray-400/50'
+                      ? 'status-completed'
+                      : job.status === 'QC Required'
+                      ? 'status-qc-required'
+                      : job.status === 'Failed QC'
+                      ? 'status-failed-qc'
+                      : 'status-pending'
                   }`}>
                     {job.status === 'in_progress' ? 'In Progress' : 
                      job.status === 'completed' ? 'Completed' : 
-                     job.status || 'Unknown'}
+                     job.status || 'Pending'}
                   </div>
                   
                   {(job.status === 'In Progress' || job.status === 'in_progress') && job.startTime && (
