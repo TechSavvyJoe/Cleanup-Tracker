@@ -5,13 +5,74 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const axios = require('axios');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const Vehicle = require('./models/Vehicle');
 
 const app = express();
 
+// Security and performance middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      fontSrc: ["'self'", "data:"]
+    }
+  }
+}));
+
+app.use(compression());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // limit each IP to 100 requests per windowMs in production
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: 15 * 60 * 1000
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Apply rate limiting to API routes (disabled in development for testing)
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/', limiter);
+}
+
+// Auth endpoints need stricter rate limiting
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 5 : 50, // limit each IP to 5 login attempts per 15 minutes in production
+  message: {
+    error: 'Too many authentication attempts, please try again later.',
+    retryAfter: 15 * 60 * 1000
+  }
+});
+
+// Apply auth rate limiting only in production
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/users/login', authLimiter);
+  app.use('/api/users/register', authLimiter);
+}
+
+// CORS configuration
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : false)
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
 // Middleware
-app.use(cors());
-app.use(bodyParser.json());
+app.use(cors(corsOptions));
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // DB Config
 const configDb = require('./config/keys').mongoURI;
@@ -19,7 +80,7 @@ const configDb = require('./config/keys').mongoURI;
 // Connect to MongoDB with fallback to in-memory server
 async function connectDb() {
   try {
-    await mongoose.connect(configDb, { useNewUrlParser: true, useUnifiedTopology: true, serverSelectionTimeoutMS: 3000 });
+    await mongoose.connect(configDb, { serverSelectionTimeoutMS: 3000 });
     console.log('MongoDB Connected');
   } catch (err) {
     if (process.env.NODE_ENV === 'production') {
@@ -30,9 +91,17 @@ async function connectDb() {
     try {
       const { MongoMemoryServer } = require('mongodb-memory-server');
       console.log('Spinning up in-memory MongoDB instance...');
-      const mongod = await MongoMemoryServer.create();
+      const mongod = await MongoMemoryServer.create({
+        instance: {
+          dbName: 'cleanup-tracker',
+          storageEngine: 'wiredTiger'
+        },
+        binary: {
+          downloadDir: path.join(__dirname, 'mongodb-binaries')
+        }
+      });
       const uri = mongod.getUri();
-      await mongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverSelectionTimeoutMS: 3000 });
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 3000 });
       console.log('Connected to in-memory MongoDB');
     } catch (memErr) {
       console.error('Failed to start in-memory MongoDB:', memErr);
@@ -40,22 +109,6 @@ async function connectDb() {
     }
   }
 }
-
-// Ensure DB is connected before starting the HTTP server
-async function main() {
-  await connectDb();
-  try {
-    await fetchAndImportInventory();
-  } catch (e) {
-    console.warn('Inventory import skipped/failed:', e.message);
-  }
-  startServer(startPort);
-}
-
-main().catch(err => {
-  console.error('Fatal startup error:', err);
-  process.exit(1);
-});
 
 // Use Routes
 app.use('/api/vehicles', require('./routes/vehicles'));
@@ -78,6 +131,22 @@ const fs = require('fs');
 
 // Try to listen on process.env.PORT or default 5051, increment on conflict
 let startPort = parseInt(process.env.PORT, 10) || 5051;
+
+// Ensure DB is connected before starting the HTTP server
+async function main() {
+  await connectDb();
+  try {
+    await fetchAndImportInventory();
+  } catch (e) {
+    console.warn('Inventory import skipped/failed:', e.message);
+  }
+  startServer(startPort);
+}
+
+main().catch(err => {
+  console.error('Fatal startup error:', err);
+  process.exit(1);
+});
 const maxPort = startPort + 100;
 
 function startServer(portToTry) {
