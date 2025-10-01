@@ -110,6 +110,16 @@ async function connectDb() {
   }
 }
 
+// Health check endpoint for deployment platforms
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // Use Routes
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/users', require('./routes/users'));

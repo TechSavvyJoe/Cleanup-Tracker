@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import VinScanner from '../components/VinScanner';
 import { useToast } from '../components/Toast';
-import ErrorBoundary from '../components/ErrorBoundary';
 import axios from 'axios';
 
 // 🎨 Modern Design System
@@ -569,7 +568,7 @@ function MainApp({ user, onLogout, onError }) {
     localStorage.setItem('app-theme', theme);
   }, [theme]);
 
-  // Enhanced toast notification system
+  // Enhanced toast toast system
   const toast = useToast();
 
   // Global error handler with proper error boundary
@@ -686,11 +685,11 @@ function MainApp({ user, onLogout, onError }) {
       
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load data';
       setError(errorMessage);
-      // Use try-catch for notification to prevent further errors
+      // Use try-catch for toast to prevent further errors
       try {
         toast.error('Failed to load data. Please try again.');
-      } catch (notificationError) {
-        Logger.warn('Failed to show notification', notificationError);
+      } catch (toastError) {
+        Logger.warn('Failed to show toast', toastError);
       }
 
       // Report to parent component if provided
@@ -958,7 +957,7 @@ function MainApp({ user, onLogout, onError }) {
         setSearchResults([]);
         setHasSearched(true);
         
-        // Don't show notifications for auto-search failures to avoid spam
+        // Don't show toasts for auto-search failures to avoid spam
         if (error.response?.status >= 500) {
           toast.warning('Server temporarily unavailable');
         }
@@ -4853,16 +4852,15 @@ export default function FirebaseV2() {
     );
   }
 
-  // Wrap the entire app in error boundary for maximum stability
+  // Main app render
   return (
-    <ErrorBoundary>
-      <Suspense fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="text-gray-900 text-xl">Loading...</div>
-        </div>
-      }>
-        {!user ? (
-          <LoginForm onLogin={handleLogin} />
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-gray-900 text-xl">Loading...</div>
+      </div>
+    }>
+      {!user ? (
+        <LoginForm onLogin={handleLogin} />
         ) : (
           <MainApp 
             user={user} 
@@ -4870,8 +4868,7 @@ export default function FirebaseV2() {
             onError={handleError}
           />
         )}
-      </Suspense>
-    </ErrorBoundary>
+    </Suspense>
   );
 }
 

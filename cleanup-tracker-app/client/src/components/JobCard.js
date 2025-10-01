@@ -74,6 +74,7 @@ const JobCard = memo(({
       isOvertime,
       percentage: Math.round((duration / expected) * 100)
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.duration, job?.durationMinutes, job?.expectedDuration]);
 
   // Memoized formatted date

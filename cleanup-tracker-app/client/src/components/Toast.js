@@ -24,7 +24,17 @@ const Toast = ({
   const [isVisible, setIsVisible] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
-    // Auto-dismiss after duration\n  useEffect(() => {\n    const timer = setTimeout(() => {\n      if (duration > 0) {\n        handleClose();\n      }\n    }, duration);\n\n    return () => clearTimeout(timer);\n  }, [duration, handleClose]);
+  // Auto-dismiss after duration
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (duration > 0) {
+        handleClose();
+      }
+    }, duration);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration]);
 
   // Animation effect
   useEffect(() => {
