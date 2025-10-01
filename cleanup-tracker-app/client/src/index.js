@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import axios from 'axios';
 import './index.css';
+import './styles/modern-responsive.css';
 import App from './App';
 
 // Allow runtime override of API base URL (useful when server port is chosen dynamically)

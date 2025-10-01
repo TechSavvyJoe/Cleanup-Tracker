@@ -4,29 +4,42 @@ import { useToast } from '../components/Toast';
 import ErrorBoundary from '../components/ErrorBoundary';
 import axios from 'axios';
 
+// 🎨 Modern Design System
+import { ModernTheme } from '../styles/ModernDesignSystem';
+
+// ⚙️ Settings Panel
+import SettingsPanel from '../components/SettingsPanel';
+
+// 📊 Enhanced Reports Component
+import EnhancedReports from '../components/EnhancedReports';
+
 // 🚀 Premium Enterprise Components - Currently Integrated
 import { 
   GlassCard, 
   ProgressRing, 
-  StatCard
-  // Available for future integration: SkeletonLoader, CommandPalette, Timeline, Badge, Tooltip
+  StatCard,
+  SkeletonLoader,
+  CommandPalette,
+  Timeline,
+  Badge,
+  Tooltip
 } from '../components/PremiumUI';
 
-// 📊 Advanced Data Visualizations - Ready to integrate
-// import { 
-//   PerformanceChart, 
-//   BarChart, 
-//   DonutChart, 
-//   Heatmap, 
-//   Sparkline 
-// } from '../components/DataVisualization';
+// 📊 Advanced Data Visualizations
+import { 
+  PerformanceChart, 
+  BarChart, 
+  DonutChart, 
+  Heatmap, 
+  Sparkline 
+} from '../components/DataVisualization';
 
-// 🤖 AI-Powered Analytics - Ready to integrate
-// import { 
-//   PredictiveAnalytics, 
-//   IntelligentSearch, 
-//   PerformanceMonitor 
-// } from '../utils/advancedAlgorithms';
+// 🤖 AI-Powered Analytics
+import { 
+  PredictiveAnalytics, 
+  IntelligentSearch, 
+  PerformanceMonitor 
+} from '../utils/advancedAlgorithms';
 
 // Professional error logging and performance monitoring
 const Logger = {
@@ -398,6 +411,19 @@ function MainApp({ user, onLogout, onError }) {
   const [settings, setSettings] = useState({ siteTitle: 'Cleanup Tracker' });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [componentError, setComponentError] = useState(null);
+  
+  // 🎨 Modern Theme State
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('app-theme');
+    return saved || 'light';
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('app-theme', theme);
+  }, [theme]);
 
   // Enhanced toast notification system
   const toast = useToast();
@@ -1029,7 +1055,12 @@ function MainApp({ user, onLogout, onError }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{
+      background: theme === 'dark' ? '#0F172A' : '#F9FAFB',
+      color: theme === 'dark' ? '#F1F5F9' : '#111827',
+      minHeight: '100vh',
+      transition: 'background-color 0.3s ease, color 0.3s ease',
+    }}>
       {/* Network Status Indicator */}
       {!isOnline && (
         <div className="bg-red-600 text-white px-4 py-2 text-center text-sm font-medium">
@@ -1040,28 +1071,82 @@ function MainApp({ user, onLogout, onError }) {
         </div>
       )}
 
-      {/* Mobile Header with pull-to-refresh */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 shadow-sm select-none">
+      {/* Modern Header with Theme Toggle */}
+      <div className="bg-white border-b border-gray-200 px-4 py-3 shadow-sm select-none" style={{
+        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
+        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
+      }}>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-gray-900 font-bold text-lg">{settings.siteTitle || 'Cleanup Tracker'}</h1>
-            <p className="text-gray-600 text-sm">{user.name} • {
-              user.role === 'manager' ? 'Manager' : 
-              user.role === 'salesperson' ? 'Sales' : 
-              'Detailer'
-            }</p>
+            <h1 className="font-bold text-lg" style={{
+              color: theme === 'dark' ? '#F1F5F9' : '#111827',
+            }}>
+              {settings.siteTitle || 'Cleanup Tracker'}
+            </h1>
+            <p className="text-sm" style={{
+              color: theme === 'dark' ? '#CBD5E1' : '#4B5563',
+            }}>
+              {user.name} • {
+                user.role === 'manager' ? 'Manager' : 
+                user.role === 'salesperson' ? 'Sales' : 
+                'Detailer'
+              }
+            </p>
           </div>
-          <button 
-            onClick={onLogout}
-            className="bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors border border-red-200"
-          >
-            Sign Out
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Theme Toggle */}
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2 rounded-lg transition-all"
+              style={{
+                background: theme === 'dark' ? '#334155' : '#F3F4F6',
+                color: theme === 'dark' ? '#F1F5F9' : '#111827',
+              }}
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            {/* Settings Button */}
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-2 rounded-lg transition-all"
+              style={{
+                background: theme === 'dark' ? '#334155' : '#F3F4F6',
+                color: theme === 'dark' ? '#F1F5F9' : '#111827',
+              }}
+              title="Settings"
+            >
+              ⚙️
+            </button>
+            <button 
+              onClick={onLogout}
+              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors border"
+              style={{
+                background: theme === 'dark' ? '#7F1D1D' : '#FEF2F2',
+                color: theme === 'dark' ? '#FEE2E2' : '#B91C1C',
+                borderColor: theme === 'dark' ? '#991B1B' : '#FEE2E2',
+              }}
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
+      
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        currentTheme={theme}
+        onThemeChange={setTheme}
+        userRole={user.role}
+      />
 
       {/* Modern Navigation */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
+      <div className="border-b px-6 py-4 shadow-sm" style={{
+        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
+        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
+      }}>
         <div className="flex space-x-2 overflow-x-auto">
           <button 
             onClick={() => setView('dashboard')} 
@@ -1224,7 +1309,7 @@ function MainApp({ user, onLogout, onError }) {
             {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
-            {view === 'reports' && <ReportsView jobs={jobs} users={users} />}
+            {view === 'reports' && <EnhancedReports jobs={jobs} users={Object.values(users)} theme={theme} />}
             {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
       {view === 'me' && <MySettingsView user={user} />}
           </>
