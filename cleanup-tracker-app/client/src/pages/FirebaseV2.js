@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import VinScanner from '../components/VinScanner';
+import { useToast } from '../components/Toast';
+import ErrorBoundary from '../components/ErrorBoundary';
 import axios from 'axios';
 
 // Professional error logging and performance monitoring
@@ -370,25 +372,18 @@ function MainApp({ user, onLogout, onError }) {
   const [showScanner, setShowScanner] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [settings, setSettings] = useState({ siteTitle: 'Cleanup Tracker' });
-  const [notification, setNotification] = useState(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [componentError, setComponentError] = useState(null);
 
-  // Enhanced notification system
-  const showNotification = useCallback((message, type = 'success', duration = 5000) => {
-    const id = Date.now();
-    setNotification({ id, message, type });
-    setTimeout(() => {
-      setNotification(null);
-    }, duration);
-  }, []);
+  // Enhanced toast notification system
+  const toast = useToast();
 
   // Global error handler with proper error boundary
   const handleError = useCallback((error, errorInfo) => {
     console.error('Component error:', error, errorInfo);
     setComponentError(error.message);
-    showNotification('Something went wrong. Please refresh the page.', 'error');
-  }, [showNotification]);
+    toast.error('Something went wrong. Please refresh the page.');
+  }, [toast]);
 
   // Error boundary effect
   useEffect(() => {
@@ -411,6 +406,13 @@ function MainApp({ user, onLogout, onError }) {
 
   // Load initial data with useCallback to prevent re-renders
   const loadInitialData = useCallback(async () => {
+    // Authentication check - prevent API calls without valid user
+    if (!user || !user.id) {
+      Logger.warn('LoadInitialData called without authenticated user - aborting');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       Logger.info('Loading initial data');
@@ -490,26 +492,36 @@ function MainApp({ user, onLogout, onError }) {
       
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load data';
       setError(errorMessage);
-      showNotification('Failed to load data. Please try again.', 'error');
-      
+      // Use try-catch for notification to prevent further errors
+      try {
+        toast.error('Failed to load data. Please try again.');
+      } catch (notificationError) {
+        Logger.warn('Failed to show notification', notificationError);
+      }
+
       // Report to parent component if provided
       if (onError) {
-        onError(errorMessage, err);
+        try {
+          onError(errorMessage, err);
+        } catch (callbackError) {
+          Logger.warn('Failed to call onError callback', callbackError);
+        }
       }
     } finally {
       setLoading(false);
     }
-  }, [showNotification, user?.id, onError]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependencies to prevent infinite loops
 
   // Network status monitoring
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      showNotification('Connection restored', 'success');
+      toast.success('Connection restored');
     };
     const handleOffline = () => {
       setIsOnline(false);
-      showNotification('Connection lost - working offline', 'warning', 0);
+      toast.warning('Connection lost - working offline');
     };
 
     window.addEventListener('online', handleOnline);
@@ -519,21 +531,33 @@ function MainApp({ user, onLogout, onError }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [showNotification]);
+  }, [toast]);
 
-  // Load data on mount and set up auto-refresh
+  // Load data on mount and set up auto-refresh with authentication check
   useEffect(() => {
-    loadInitialData();
-    
+    // Add a small delay to ensure authentication state is stable
+    const timer = setTimeout(() => {
+      if (user && user.id) {
+        Logger.info('Starting initial data load for authenticated user', { userId: user.id });
+        loadInitialData();
+      } else {
+        Logger.warn('Skipping initial data load - user not authenticated');
+      }
+    }, 100); // 100ms delay to ensure authentication is stable
+
     // Set up auto-refresh every 30 seconds for real-time updates
     const refreshInterval = setInterval(() => {
-      if (!loading) {
+      if (!loading && user && user.id) {
         loadInitialData();
       }
     }, 30000);
 
-    return () => clearInterval(refreshInterval);
-  }, [loading, loadInitialData]);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(refreshInterval);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]); // Only depend on user to prevent infinite loops
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -548,7 +572,7 @@ function MainApp({ user, onLogout, onError }) {
           case 'r':
             event.preventDefault();
             loadInitialData();
-            showNotification('Data refreshed', 'success');
+            toast.success('Data refreshed');
             break;
           case '1':
             event.preventDefault();
@@ -575,7 +599,8 @@ function MainApp({ user, onLogout, onError }) {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [user.role, loadInitialData, showNotification]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.role]); // Removed loadInitialData and toast to prevent loops
 
     // One-time inventory warm-up: if first search returns empty and not yet warmed, trigger refresh
     useEffect(() => {
@@ -610,13 +635,13 @@ function MainApp({ user, onLogout, onError }) {
       
       const sanitizedTerm = Security.sanitizeInput(term.trim());
       if (!sanitizedTerm) {
-        showNotification('Please enter a search term', 'warning');
+        toast.warning('Please enter a search term');
         return;
       }
       
       // Length validation for performance
       if (sanitizedTerm.length > 50) {
-        showNotification('Search term too long. Please enter a shorter term.', 'warning');
+        toast.warning('Search term too long. Please enter a shorter term.');
         return;
       }
       
@@ -652,10 +677,10 @@ function MainApp({ user, onLogout, onError }) {
       
       // User feedback based on results
       if (results.length === 0) {
-        showNotification(`No vehicles found for "${sanitizedTerm}". Try a different search term.`, 'info');
+        toast.info(`No vehicles found for "${sanitizedTerm}". Try a different search term.`);
         Logger.info('Search returned no results', { searchTerm: sanitizedTerm });
       } else {
-        showNotification(`Found ${results.length} vehicle(s)`, 'success');
+        toast.success(`Found ${results.length} vehicle(s)`);
         Logger.info('Search completed successfully', { 
           searchTerm: sanitizedTerm,
           resultCount: results.length 
@@ -670,12 +695,12 @@ function MainApp({ user, onLogout, onError }) {
       
       setSearchResults([]);
       setHasSearched(true);
-      showNotification(error.message || 'Search failed. Please try again.', 'error');
+      toast.error(error.message || 'Search failed. Please try again.');
       
     } finally {
       setIsSearching(false);
     }
-  }, [user.id, showNotification]);
+  }, [user.id, toast]);
 
   // Enhanced debounced auto-search with professional error handling and performance optimization
   useEffect(() => {
@@ -741,7 +766,7 @@ function MainApp({ user, onLogout, onError }) {
         
         // Don't show notifications for auto-search failures to avoid spam
         if (error.response?.status >= 500) {
-          showNotification('Server temporarily unavailable', 'warning');
+          toast.warning('Server temporarily unavailable');
         }
       } finally {
         setIsSearching(false);
@@ -752,7 +777,7 @@ function MainApp({ user, onLogout, onError }) {
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [searchTerm, user.id, showNotification]);
+  }, [searchTerm, user.id, toast]);
 
   // Scan success handler
   // Enhanced VIN scanner success handler with comprehensive validation
@@ -770,7 +795,7 @@ function MainApp({ user, onLogout, onError }) {
       // Professional VIN validation
       if (!Security.validateVin(vin)) {
         Logger.warn('Invalid VIN scanned', { vin, userId: user.id });
-        showNotification('Invalid VIN format. Please scan again or enter manually.', 'warning');
+        toast.warning('Invalid VIN format. Please scan again or enter manually.');
         return;
       }
       
@@ -789,7 +814,7 @@ function MainApp({ user, onLogout, onError }) {
           await loadInitialData();
           setSearchTerm(vin);
           setView('dashboard');
-          showNotification('Successfully joined existing job!', 'success');
+          toast.success('Successfully joined existing job!');
           
         } catch (joinError) {
           // Graceful fallback to vehicle search
@@ -807,9 +832,9 @@ function MainApp({ user, onLogout, onError }) {
             setView('jobs');
             
             if (results.length === 0) {
-              showNotification('No vehicles found with this VIN. Please verify and try again.', 'warning');
+              toast.warning('No vehicles found with this VIN. Please verify and try again.');
             } else {
-              showNotification(`Found ${results.length} vehicle(s)`, 'success');
+              toast.success(`Found ${results.length} vehicle(s)`);
             }
             
           } catch (searchError) {
@@ -825,9 +850,10 @@ function MainApp({ user, onLogout, onError }) {
       });
       
       const errorMessage = error.message || 'VIN processing failed';
-      showNotification(errorMessage, 'error');
+      toast.error(errorMessage);
     }
-  }, [user.id, loadInitialData, showNotification]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id]); // Removed loadInitialData and toast to prevent loops
 
   // Stop work handler
   const handleStopWork = async () => {
@@ -846,9 +872,9 @@ function MainApp({ user, onLogout, onError }) {
       });
       
       await loadInitialData(); // Reload data
-      showNotification('Job completed successfully! 🎉', 'success');
+      toast.success('Job completed successfully! 🎉');
     } catch (err) {
-      showNotification('Failed to complete job: ' + (err.response?.data?.error || err.message), 'error');
+      toast.error('Failed to complete job: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -980,48 +1006,6 @@ function MainApp({ user, onLogout, onError }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Enhanced Notification System */}
-      {notification && (
-        <div className={`fixed top-4 right-4 z-50 max-w-sm w-full transform transition-all duration-300 ${
-          notification.type === 'success' ? 'bg-green-500' :
-          notification.type === 'error' ? 'bg-red-500' :
-          notification.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-        } text-white p-4 rounded-lg shadow-lg border border-white/20`}>
-          <div className="flex items-start">
-            <div className="flex-shrink-0">
-              {notification.type === 'success' && (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-              {notification.type === 'error' && (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              )}
-              {notification.type === 'warning' && (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              )}
-            </div>
-            <div className="ml-3 flex-1">
-              <p className="text-sm font-medium">{notification.message}</p>
-            </div>
-            <div className="ml-4 flex-shrink-0">
-              <button 
-                onClick={() => setNotification(null)}
-                className="inline-flex text-white hover:text-gray-200 focus:outline-none"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Network Status Indicator */}
       {!isOnline && (
         <div className="bg-red-600 text-white px-4 py-2 text-center text-sm font-medium">
@@ -1205,15 +1189,15 @@ function MainApp({ user, onLogout, onError }) {
         {/* Detailer Views */}
         {user.role === 'detailer' && (
           <>
-            {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} showNotification={showNotification} />}
-            {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} showNotification={showNotification} />}
+            {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} />}
+            {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} />}
             {view === 'me' && <MySettingsView user={user} />}
           </>
         )}        {/* Manager Views */}
     {user.role === 'manager' && (
           <>
             {view === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} dashboardStats={dashboardStats} />}
-            {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} showNotification={showNotification} />}
+            {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
             {view === 'reports' && <ReportsView jobs={jobs} users={users} />}
@@ -1235,7 +1219,7 @@ function MainApp({ user, onLogout, onError }) {
 }
 
 // Detailer Dashboard Component
-function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWork, onOpenScanner, onGoToNewJob, showNotification }) {
+function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWork, onOpenScanner, onGoToNewJob }) {
   const [filterDate, setFilterDate] = useState('');
   const [filterServiceType, setFilterServiceType] = useState('');
   const [showStats, setShowStats] = useState(false);
@@ -2067,7 +2051,8 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
 }
 
 // Detailer New Job Component
-function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm, setSearchTerm, showScanner, setShowScanner, onScanSuccess, hasSearched, onJobCreated, showNotification }) {
+function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm, setSearchTerm, showScanner, setShowScanner, onScanSuccess, hasSearched, onJobCreated }) {
+  const toast = useToast();
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [serviceType, setServiceType] = useState('Detail');
   const [salesPerson, setSalesPerson] = useState('');
@@ -2104,22 +2089,22 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
   const handleCreateJob = async () => {
     // Enhanced validation
     if (!selectedVehicle) {
-      showNotification('Please select a vehicle first', 'error');
+      toast.error('Please select a vehicle first');
       return;
     }
     
     if (!serviceType || serviceType.trim() === '') {
-      showNotification('Please select a service type', 'error');
+      toast.error('Please select a service type');
       return;
     }
 
     if (!selectedVehicle.vin || selectedVehicle.vin.length < 10) {
-      showNotification('Invalid VIN number', 'error');
+      toast.error('Invalid VIN number');
       return;
     }
     
     try {
-      showNotification('Creating job...', 'info', 2000);
+      toast.info('Creating job...');
       const now = new Date();
       const newJob = {
         technicianId: user.id,
@@ -2145,7 +2130,7 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
       };
       
       await V2.post('/jobs', newJob);
-      showNotification('Job started successfully! 🚗', 'success');
+      toast.success('Job started successfully! 🚗');
       setSelectedVehicle(null);
       setSearchTerm('');
       setSalesPerson('');
@@ -2155,7 +2140,7 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
         await onJobCreated();
       }
     } catch (err) {
-      showNotification('Failed to start job: ' + (err.response?.data?.error || err.message), 'error');
+      toast.error('Failed to start job: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -3200,7 +3185,7 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
 }
 
 // Jobs View Component
-function JobsView({ jobs, users, currentUser, onRefresh, showNotification }) {
+function JobsView({ jobs, users, currentUser, onRefresh }) {
   const [selectedJob, setSelectedJob] = useState(null);
   const [jobDetails, setJobDetails] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -4452,61 +4437,6 @@ function ReportsView({ jobs = [], users = {} }) {
   );
 }
 
-/**
- * Professional Error Boundary Component
- * Catches JavaScript errors anywhere in the child component tree
- */
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    Logger.error('React Error Boundary caught an error', error, { errorInfo });
-    this.setState({ error, errorInfo });
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-          <div className="bg-white rounded-xl p-8 shadow-lg max-w-md w-full text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Something went wrong</h3>
-            <p className="text-gray-600 mb-4">
-              We've encountered an unexpected error. Please refresh the page or contact support if the problem persists.
-            </p>
-            {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mt-4 text-left">
-                <summary className="cursor-pointer text-sm text-gray-500">Error Details (Dev Mode)</summary>
-                <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto">
-                  {this.state.error.toString()}
-                </pre>
-              </details>
-            )}
-            <button 
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors mt-4"
-            >
-              Refresh Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
 
 
 // Main Component - Enhanced with professional error handling
