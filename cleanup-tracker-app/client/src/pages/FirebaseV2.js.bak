@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast';
 import axios from 'axios';
 
 // 🎨 Modern Design System
+import { ModernTheme } from '../styles/ModernDesignSystem';
 
 // ⚙️ Settings Panel
 import SettingsPanel from '../components/SettingsPanel';
@@ -16,14 +17,27 @@ import {
   GlassCard, 
   ProgressRing, 
   StatCard,
+  SkeletonLoader,
+  CommandPalette,
+  Timeline,
+  Badge,
+  Tooltip
 } from '../components/PremiumUI';
 
 // 📊 Advanced Data Visualizations
 import { 
+  PerformanceChart, 
+  BarChart, 
+  DonutChart, 
+  Heatmap, 
+  Sparkline 
 } from '../components/DataVisualization';
 
 // 🤖 AI-Powered Analytics
 import { 
+  PredictiveAnalytics, 
+  IntelligentSearch, 
+  PerformanceMonitor 
 } from '../utils/advancedAlgorithms';
 
 // Professional error logging and performance monitoring
