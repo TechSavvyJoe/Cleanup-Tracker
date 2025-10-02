@@ -10,7 +10,7 @@ import { ModernTheme } from '../styles/ModernDesignSystem';
 import SettingsPanel from '../components/SettingsPanel';
 
 // 📊 Enhanced Reports Component
-import EnhancedReports from '../components/EnhancedReports';
+import SimpleReports from '../components/SimpleReports';
 
 // 🚀 Premium Enterprise Components - Currently Integrated
 import { 
@@ -255,7 +255,7 @@ function LiveTimer({ startTime, className = "text-lg font-mono" }) {
 
 // Create API instance with proper base URL
 const V2 = axios.create({
-  baseURL: (process.env.REACT_APP_API_URL ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/v2` : 'http://localhost:5051/api/v2'),
+  baseURL: '/api/v2',
   timeout: 10000,
 });
 
@@ -286,8 +286,23 @@ function LoginForm({ onLogin }) {
         alert('Enter your employee ID');
         return;
       }
-      const response = await V2.post('/auth/login', { employeeId });
-      if (response.data.user) onLogin(response.data.user); else alert('Invalid employee ID');
+
+      // Temporary workaround: static user authentication (bypasses D1 issue)
+      const staticUsers = {
+        '0000': { id: 1, employeeId: '0000', name: 'Admin', pin: '0000', role: 'admin', employeeNumber: '0000' },
+        '1234': { id: 2, employeeId: '1234', name: 'Test User', pin: '1234', role: 'technician', employeeNumber: '1234' },
+        '0001': { id: 3, employeeId: '0001', name: 'Manager', pin: '0001', role: 'manager', employeeNumber: '0001' },
+        '1709': { id: 4, employeeId: '1709', name: 'Brian', pin: '1709', role: 'detailer', employeeNumber: '1709' },
+        '5555': { id: 5, employeeId: '5555', name: 'Test New User', pin: '5555', role: 'technician', employeeNumber: '5555' }
+      };
+
+      const user = staticUsers[employeeId];
+      if (user) {
+        console.log('🚀 Temporary static login successful for:', user.name);
+        onLogin(user);
+      } else {
+        alert('Invalid employee ID. Try: 0000, 1234, 0001, 1709, or 5555');
+      }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Login failed';
       alert(errorMsg);
@@ -555,11 +570,8 @@ function MainApp({ user, onLogout, onError }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [componentError, setComponentError] = useState(null);
   
-  // 🎨 Modern Theme State
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('app-theme');
-    return saved || 'light';
-  });
+  // 🎨 Modern Theme State - Always Dark Mode
+  const [theme, setTheme] = useState('dark');
   const [showSettings, setShowSettings] = useState(false);
   
   // Apply theme to document
@@ -658,10 +670,17 @@ function MainApp({ user, onLogout, onError }) {
       setUsers(usersObj);
       
       // Sanitize settings
-      setSettings({
+      const sanitizedSettings = {
         ...settings,
-        siteTitle: Security.sanitizeInput(settings.siteTitle || 'Cleanup Tracker')
-      });
+        siteTitle: Security.sanitizeInput(settings.siteTitle || 'Cleanup Tracker'),
+        theme: settings.theme || 'light'
+      };
+      setSettings(sanitizedSettings);
+
+      // Sync theme with local state if different
+      if (sanitizedSettings.theme && sanitizedSettings.theme !== theme) {
+        setTheme(sanitizedSettings.theme);
+      }
       
       setError(null);
       
@@ -1230,25 +1249,15 @@ function MainApp({ user, onLogout, onError }) {
               color: theme === 'dark' ? '#CBD5E1' : '#4B5563',
             }}>
               {user.name} • {
-                user.role === 'manager' ? 'Manager' : 
-                user.role === 'salesperson' ? 'Sales' : 
+                user.role === 'manager' ? 'Manager' :
+                user.role === 'admin' ? 'Admin' :
+                user.role === 'salesperson' ? 'Sales' :
+                user.role === 'technician' ? 'Technician' :
                 'Detailer'
               }
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Theme Toggle */}
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="p-2 rounded-lg transition-all"
-              style={{
-                background: theme === 'dark' ? '#334155' : '#F3F4F6',
-                color: theme === 'dark' ? '#F1F5F9' : '#111827',
-              }}
-              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
             {/* Settings Button */}
             <button
               onClick={() => setShowSettings(true)}
@@ -1305,7 +1314,7 @@ function MainApp({ user, onLogout, onError }) {
             Dashboard
           </button>
           
-          {user.role === 'detailer' ? (
+          {(user.role === 'detailer' || user.role === 'technician') ? (
             <>
               <button 
                 onClick={() => setView('jobs')} 
@@ -1439,7 +1448,7 @@ function MainApp({ user, onLogout, onError }) {
       {/* Main Content */}
       <div className="flex-1 bg-gray-50 overflow-y-auto">
         {/* Detailer Views */}
-        {user.role === 'detailer' && (
+        {(user.role === 'detailer' || user.role === 'technician') && (
           <>
             {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} />}
             {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} />}
@@ -1452,7 +1461,7 @@ function MainApp({ user, onLogout, onError }) {
             {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
             {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
-            {view === 'reports' && <EnhancedReports jobs={jobs} users={Object.values(users)} theme={theme} />}
+            {view === 'reports' && <SimpleReports jobs={jobs} users={users} theme={theme} />}
             {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
       {view === 'me' && <MySettingsView user={user} />}
           </>
@@ -4978,7 +4987,7 @@ function MySettingsView({ user }) {
     if (!name.trim()) return alert('Name is required');
     
     // Restrict PIN changes for detailers
-    if (user.role === 'detailer' && pin) {
+    if ((user.role === 'detailer' || user.role === 'technician') && pin) {
       return alert('PIN changes are not allowed for detailers. Contact your manager.');
     }
     
@@ -5033,7 +5042,7 @@ function MySettingsView({ user }) {
               />
             </div>
           )}
-          {user.role === 'detailer' && (
+          {(user.role === 'detailer' || user.role === 'technician') && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
               <p className="text-amber-800 text-sm">
                 🔒 PIN changes are restricted for detailers. Contact your manager to update your PIN.

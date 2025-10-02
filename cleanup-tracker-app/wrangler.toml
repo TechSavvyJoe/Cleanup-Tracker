@@ -1,0 +1,8 @@
+name = "cleanup-tracker-app"
+compatibility_date = "2024-09-02"
+pages_build_output_dir = "client/build"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cleanup-tracker-new"
+database_id = "34447ac0-8327-4b48-b4ce-907714557860"

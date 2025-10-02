@@ -1,9 +1,16 @@
 name = "cleanup-tracker-app"
 compatibility_date = "2023-05-18"
+
+# Pages configuration
 pages_build_output_dir = "cleanup-tracker-app/client/build"
 
+# Environment variables
+[env.production.vars]
+NODE_ENV = "production"
+
 # Production database (used for deployment)
-[[d1_databases]]
+[env.production]
+[[env.production.d1_databases]]
 binding = "DB"
 database_name = "cleanup-tracker-prod"
 database_id = "2b7f91f0-c409-4a4e-85a0-a35b4475af8c"

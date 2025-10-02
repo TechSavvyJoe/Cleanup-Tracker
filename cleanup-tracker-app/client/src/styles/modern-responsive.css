@@ -9,8 +9,8 @@
   --color-bg-secondary: #F9FAFB;
   --color-bg-tertiary: #F3F4F6;
   --color-text-primary: #111827;
-  --color-text-secondary: #4B5563;
-  --color-text-tertiary: #9CA3AF;
+  --color-text-secondary: #374151;
+  --color-text-tertiary: #6B7280;
   --color-border: #E5E7EB;
   --color-border-hover: #D1D5DB;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -26,8 +26,8 @@
   --color-bg-secondary: #1E293B;
   --color-bg-tertiary: #334155;
   --color-text-primary: #F1F5F9;
-  --color-text-secondary: #CBD5E1;
-  --color-text-tertiary: #94A3B8;
+  --color-text-secondary: #E2E8F0;
+  --color-text-tertiary: #CBD5E1;
   --color-border: #334155;
   --color-border-hover: #475569;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
@@ -46,6 +46,60 @@ html {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Global text color utilities using CSS variables */
+.text-primary {
+  color: var(--color-text-primary) !important;
+}
+
+.text-secondary {
+  color: var(--color-text-secondary) !important;
+}
+
+.text-tertiary {
+  color: var(--color-text-tertiary) !important;
+}
+
+/* Override Tailwind colors with variable-based ones */
+.text-gray-900 {
+  color: var(--color-text-primary) !important;
+}
+
+.text-gray-800 {
+  color: var(--color-text-primary) !important;
+}
+
+.text-gray-700 {
+  color: var(--color-text-secondary) !important;
+}
+
+.text-gray-600 {
+  color: var(--color-text-secondary) !important;
+}
+
+.text-gray-500 {
+  color: var(--color-text-tertiary) !important;
+}
+
+.bg-white {
+  background-color: var(--color-bg-primary) !important;
+}
+
+.bg-gray-50 {
+  background-color: var(--color-bg-secondary) !important;
+}
+
+.bg-gray-100 {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
+.border-gray-200 {
+  border-color: var(--color-border) !important;
+}
+
+.border-gray-300 {
+  border-color: var(--color-border-hover) !important;
 }
 
 body {

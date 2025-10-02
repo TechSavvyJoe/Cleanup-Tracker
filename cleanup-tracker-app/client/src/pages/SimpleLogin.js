@@ -3,7 +3,7 @@ import axios from 'axios';
 
 // Create a minimal API client
 const API = axios.create({
-  baseURL: 'http://localhost:5051/api/v2',
+  baseURL: '/api/v2',
   timeout: 10000,
 });
 
