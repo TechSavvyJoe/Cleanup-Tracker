@@ -1,14 +1,19 @@
-// Settings management endpoint - temporary workaround for D1 issue
+// Settings management endpoint
 export async function onRequestGet(context) {
   try {
-    // Temporary static settings (replace with D1 when issue is resolved)
-    const staticSettings = {
-      siteTitle: 'Cleanup Tracker',
-      inventoryCsvUrl: '',
-      theme: 'light'
-    };
+    const { env } = context;
 
-    return new Response(JSON.stringify(staticSettings), {
+    // Get all settings from database
+    const stmt = env.DB.prepare('SELECT key, value FROM settings');
+    const { results } = await stmt.all();
+
+    // Convert to object format
+    const settings = {};
+    results?.forEach(row => {
+      settings[row.key] = row.value;
+    });
+
+    return new Response(JSON.stringify(settings), {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
@@ -35,22 +40,42 @@ export async function onRequestPut(context) {
     const { env, request } = context;
     const updateData = await request.json();
 
-    // Update or insert settings
-    const stmt = env.DB.prepare(`
-      INSERT OR REPLACE INTO settings (id, siteTitle, theme, timezone, updatedAt)
-      VALUES (1, ?, ?, ?, ?)
-    `);
+    const { key, value } = updateData;
 
-    await stmt.bind(
-      updateData.siteTitle || 'Cleanup Tracker',
-      updateData.theme || 'light',
-      updateData.timezone || 'UTC',
-      new Date().toISOString()
-    ).run();
+    if (!key) {
+      return new Response(JSON.stringify({
+        success: false,
+        message: 'Setting key is required'
+      }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
+    // Check if setting exists
+    const checkStmt = env.DB.prepare('SELECT key FROM settings WHERE key = ?');
+    const existing = await checkStmt.bind(key).first();
+
+    if (existing) {
+      // Update existing setting
+      const updateStmt = env.DB.prepare('UPDATE settings SET value = ?, updatedAt = ? WHERE key = ?');
+      await updateStmt.bind(value, new Date().toISOString(), key).run();
+    } else {
+      // Insert new setting
+      const insertStmt = env.DB.prepare(`
+        INSERT INTO settings (key, value, category, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const now = new Date().toISOString();
+      await insertStmt.bind(key, value, 'general', now, now).run();
+    }
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Settings updated successfully'
+      message: 'Setting updated successfully'
     }), {
       headers: {
         'Content-Type': 'application/json',
