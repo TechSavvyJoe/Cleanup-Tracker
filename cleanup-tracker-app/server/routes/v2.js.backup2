@@ -553,7 +553,7 @@ router.get('/vehicles/search', async (req, res) => {
   const last6 = term.length === 6 ? new RegExp(escapeRegex(term) + '$', 'i') : null;
   const query = last6
     ? { $or: [ { vin: last6 }, { stockNumber: rx } ] }
-    : { $or: [ { vin: rx }, { stockNumber: rx }, { make: rx }, { model: rx }, { vehicle: rx } ] };
+    : { $or: [ { vin: rx }, { stockNumber: rx } ] };
   const results = await Vehicle.find(query).limit(10);
   res.json(results.map(v => ({
     vin: v.vin,
