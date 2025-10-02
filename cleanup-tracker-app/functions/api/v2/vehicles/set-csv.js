@@ -1,7 +1,7 @@
 // Vehicle CSV URL configuration endpoint
 export async function onRequestPost(context) {
   try {
-    const { request } = context;
+    const { env, request } = context;
     const { url } = await request.json();
 
     if (!url) {
@@ -33,9 +33,23 @@ export async function onRequestPost(context) {
       });
     }
 
-    // In a real implementation, this would save to database
-    // For now, just return success
-    console.log('CSV URL configured:', url);
+    // Save to settings table with snake_case key
+    const checkStmt = env.DB.prepare("SELECT value FROM settings WHERE key = 'inventory_csv_url'");
+    const existing = await checkStmt.first();
+
+    if (existing) {
+      // Update existing setting
+      const updateStmt = env.DB.prepare("UPDATE settings SET value = ?, updatedAt = ? WHERE key = 'inventory_csv_url'");
+      await updateStmt.bind(url, new Date().toISOString()).run();
+    } else {
+      // Insert new setting
+      const insertStmt = env.DB.prepare(`
+        INSERT INTO settings (key, value, category, createdAt, updatedAt)
+        VALUES ('inventory_csv_url', ?, 'inventory', ?, ?)
+      `);
+      const now = new Date().toISOString();
+      await insertStmt.bind(url, now, now).run();
+    }
 
     return new Response(JSON.stringify({
       success: true,
@@ -68,7 +82,7 @@ export async function onRequestOptions(context) {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization'
     }
   });
