@@ -7,10 +7,12 @@ export async function onRequestGet(context) {
     const stmt = env.DB.prepare('SELECT key, value FROM settings');
     const { results } = await stmt.all();
 
-    // Convert to object format
+    // Convert to object format with camelCase keys for frontend
     const settings = {};
     results?.forEach(row => {
-      settings[row.key] = row.value;
+      // Convert snake_case to camelCase for frontend compatibility
+      const camelKey = row.key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+      settings[camelKey] = row.value;
     });
 
     return new Response(JSON.stringify(settings), {
@@ -55,14 +57,17 @@ export async function onRequestPut(context) {
       });
     }
 
+    // Convert camelCase to snake_case for database storage
+    const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+
     // Check if setting exists
     const checkStmt = env.DB.prepare('SELECT key FROM settings WHERE key = ?');
-    const existing = await checkStmt.bind(key).first();
+    const existing = await checkStmt.bind(dbKey).first();
 
     if (existing) {
       // Update existing setting
       const updateStmt = env.DB.prepare('UPDATE settings SET value = ?, updatedAt = ? WHERE key = ?');
-      await updateStmt.bind(value, new Date().toISOString(), key).run();
+      await updateStmt.bind(value, new Date().toISOString(), dbKey).run();
     } else {
       // Insert new setting
       const insertStmt = env.DB.prepare(`
@@ -70,7 +75,7 @@ export async function onRequestPut(context) {
         VALUES (?, ?, ?, ?, ?)
       `);
       const now = new Date().toISOString();
-      await insertStmt.bind(key, value, 'general', now, now).run();
+      await insertStmt.bind(dbKey, value, 'general', now, now).run();
     }
 
     return new Response(JSON.stringify({
