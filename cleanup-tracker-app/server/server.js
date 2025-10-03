@@ -126,16 +126,12 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/cleanups', require('./routes/cleanups'));
 app.use('/api/v2', require('./routes/v2'));
 
-// Serve static assets if in production
-if (process.env.NODE_ENV === 'production') {
-  // Serve client build from ../client/build relative to server directory
-  const clientBuildPath = path.resolve(__dirname, '..', 'client', 'build');
-  app.use(express.static(clientBuildPath));
-
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
-}
+// Serve static assets (both dev and prod)
+const clientBuildPath = path.resolve(__dirname, '..', 'client', 'build');
+app.use(express.static(clientBuildPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(clientBuildPath, 'index.html'));
+});
 
 const fs = require('fs');
 

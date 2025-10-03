@@ -40,7 +40,7 @@ const limiter = rateLimit({
 });
 
 // Apply rate limiting to API routes (disabled in development for testing)
-// if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production') {
   app.use('/api/', limiter);
 }
 
@@ -55,7 +55,7 @@ const authLimiter = rateLimit({
 });
 
 // Apply auth rate limiting only in production
-// if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production') {
   app.use('/api/users/login', authLimiter);
   app.use('/api/users/register', authLimiter);
 }
@@ -83,7 +83,7 @@ async function connectDb() {
     await mongoose.connect(configDb, { serverSelectionTimeoutMS: 3000 });
     console.log('MongoDB Connected');
   } catch (err) {
-//     if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production') {
       console.error('MongoDB connection failed in production. Set MONGO_URI env. Error:', err.message);
       process.exit(1);
     }
@@ -126,8 +126,8 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/cleanups', require('./routes/cleanups'));
 app.use('/api/v2', require('./routes/v2'));
 
-// Serve static assets (dev and prod)
-// if (process.env.NODE_ENV === 'production') {
+// Serve static assets if in production
+if (process.env.NODE_ENV === 'production') {
   // Serve client build from ../client/build relative to server directory
   const clientBuildPath = path.resolve(__dirname, '..', 'client', 'build');
   app.use(express.static(clientBuildPath));
