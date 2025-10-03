@@ -14,7 +14,7 @@
     }
     html {
       -webkit-text-size-adjust: 100%;
-      font-size: 14px;
+      font-size: 12px !important;
     }
     body {
       margin: 0;
@@ -28,12 +28,46 @@
       overflow-x: hidden;
     }
     * { box-sizing: border-box; }
-    @media (max-width: 768px) {
-      .p-8, .p-10, [class*="p-8"], [class*="p-10"] { padding: 1rem !important; }
-      .text-4xl { font-size: 1.5rem !important; }
-      .text-2xl { font-size: 1.25rem !important; }
-      .py-4, .py-5 { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
-      button { padding: 0.625rem 1rem !important; font-size: 0.875rem !important; }
+    
+    /* HIDE THE GIANT CIRCLE/LOGO */
+    svg, .w-24, .h-24, .w-16, .h-16, .w-14, .h-14 {
+      max-width: 48px !important;
+      max-height: 48px !important;
+    }
+    
+    /* Force all text to be smaller */
+    h1, .text-5xl { font-size: 1.25rem !important; }
+    h2, .text-2xl { font-size: 1rem !important; }
+    .text-4xl { font-size: 1.25rem !important; }
+    .text-xl { font-size: 0.875rem !important; }
+    .text-lg { font-size: 0.875rem !important; }
+    
+    /* Reduce all padding and margins */
+    .p-8, .p-10, .py-8, .py-10, .px-8, .px-10,
+    [class*="p-8"], [class*="p-10"] { 
+      padding: 0.75rem !important; 
+    }
+    .py-5, .py-6 { 
+      padding-top: 0.5rem !important; 
+      padding-bottom: 0.5rem !important; 
+    }
+    .mb-8, .mb-6, .my-8 { 
+      margin-bottom: 0.75rem !important; 
+    }
+    .gap-8, .gap-12 { 
+      gap: 0.75rem !important; 
+    }
+    
+    /* Make buttons smaller */
+    button {
+      padding: 0.5rem 0.75rem !important;
+      font-size: 0.75rem !important;
+      min-height: 36px !important;
+    }
+    
+    /* Reduce border radius */
+    .rounded-3xl, .rounded-2xl {
+      border-radius: 0.75rem !important;
     }
   </style>
   </head>
