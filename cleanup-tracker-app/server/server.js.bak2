@@ -144,22 +144,22 @@ let startPort = parseInt(process.env.PORT, 10) || 5051;
 
 // Seed default users if none exist
 async function seedUsersIfNeeded() {
-  const V2User = require("./models/V2User");
-  const count = await V2User.countDocuments();
+  const User = require("./models/User");
+  const count = await User.countDocuments();
   if (count > 0) {
     console.log(`Users already seeded (${count} users found)`);
     return;
   }
   console.log("No users found. Seeding default users...");
   const defaultUsers = [
-    { name: "Joe Gallant", role: "manager", pin: "1701", employeeNumber: "MGR001", phoneNumber: "555-0001" },
+    { username: "manager", name: "Joe Gallant", role: "manager", password: "password", pin: "1701", employeeNumber: "MGR001", phoneNumber: "555-0001" },
     { name: "Alfred", role: "detailer", pin: "1716", uid: "detailer-001", employeeNumber: "DET001", phoneNumber: "555-0002" },
     { name: "Brian", role: "detailer", pin: "1709", uid: "detailer-002", employeeNumber: "DET002", phoneNumber: "555-0003" },
     { name: "Sarah Johnson", role: "salesperson", pin: "2001", employeeNumber: "SALES001", phoneNumber: "555-0101" },
     { name: "Mike Chen", role: "salesperson", pin: "2002", employeeNumber: "SALES002", phoneNumber: "555-0102" },
     { name: "Lisa Rodriguez", role: "salesperson", pin: "2003", employeeNumber: "SALES003", phoneNumber: "555-0103" }
   ];
-  await V2User.insertMany(defaultUsers);
+  await User.insertMany(defaultUsers);
   console.log(`Seeded ${defaultUsers.length} default users`);
 }
 
@@ -167,11 +167,11 @@ async function seedUsersIfNeeded() {
 async function main() {
   await connectDb();
   try {
+  try {
     await seedUsersIfNeeded();
   } catch (e) {
     console.warn("User seeding failed:", e.message);
   }
-  try {
     await fetchAndImportInventory();
   } catch (e) {
     console.warn('Inventory import skipped/failed:', e.message);

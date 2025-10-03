@@ -171,7 +171,6 @@ async function main() {
   } catch (e) {
     console.warn("User seeding failed:", e.message);
   }
-  try {
     await fetchAndImportInventory();
   } catch (e) {
     console.warn('Inventory import skipped/failed:', e.message);

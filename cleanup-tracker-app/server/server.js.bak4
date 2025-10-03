@@ -167,11 +167,11 @@ async function seedUsersIfNeeded() {
 async function main() {
   await connectDb();
   try {
+  try {
     await seedUsersIfNeeded();
   } catch (e) {
     console.warn("User seeding failed:", e.message);
   }
-  try {
     await fetchAndImportInventory();
   } catch (e) {
     console.warn('Inventory import skipped/failed:', e.message);
