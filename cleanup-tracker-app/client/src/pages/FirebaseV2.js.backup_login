@@ -273,15 +273,21 @@ function LoginForm({ onLogin }) {
         return;
       }
 
-      // Use real API authentication
-      const response = await V2.post('/auth/login', { employeeId });
-      const user = response.data.user;
-      
+      // Temporary workaround: static user authentication (bypasses D1 issue)
+      const staticUsers = {
+        '0000': { id: 1, employeeId: '0000', name: 'Admin', pin: '0000', role: 'admin', employeeNumber: '0000' },
+        '1234': { id: 2, employeeId: '1234', name: 'Test User', pin: '1234', role: 'technician', employeeNumber: '1234' },
+        '0001': { id: 3, employeeId: '0001', name: 'Manager', pin: '0001', role: 'manager', employeeNumber: '0001' },
+        '1709': { id: 4, employeeId: '1709', name: 'Brian', pin: '1709', role: 'detailer', employeeNumber: '1709' },
+        '5555': { id: 5, employeeId: '5555', name: 'Test New User', pin: '5555', role: 'technician', employeeNumber: '5555' }
+      };
+
+      const user = staticUsers[employeeId];
       if (user) {
-        console.log('✅ Login successful for:', user.name);
+        console.log('🚀 Temporary static login successful for:', user.name);
         onLogin(user);
       } else {
-        alert('Invalid employee ID or PIN');
+        alert('Invalid employee ID. Try: 0000, 1234, 0001, 1709, or 5555');
       }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Login failed';
