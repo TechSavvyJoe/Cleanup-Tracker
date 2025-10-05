@@ -57,9 +57,10 @@ The development setup uses an in-memory database, so no MongoDB installation is 
 
 ## 📖 Documentation
 
+- **[DOCUMENTATION.md](./DOCUMENTATION.md)** - Complete documentation index
 - **[SETUP.md](./SETUP.md)** - Comprehensive setup and deployment guide
-- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Production deployment instructions
-- **[CLOUDFLARE_PAGES.md](./CLOUDFLARE_PAGES.md)** - Cloudflare Pages specific setup
+- **[docs/deployment/](./docs/deployment/)** - Deployment guides and checklists
+- **[docs/guides/](./docs/guides/)** - User guides and quick references
 
 ## 🏗️ Architecture
 
@@ -258,4 +259,4 @@ Copyright © 2025 Mission Ford of Dearborn
 
 **Built with ❤️ for Mission Ford of Dearborn**
 
-*Last updated: September 30, 2025*
+*Last updated: October 2025*
