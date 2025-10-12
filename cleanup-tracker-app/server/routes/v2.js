@@ -5,13 +5,135 @@ const Job = require('../models/Job');
 const Vehicle = require('../models/Vehicle');
 const axios = require('axios');
 const csv = require('csv-parser');
-const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 
 // Simple key-value Settings in-memory (fallback) with optional Mongo storage
 const settingsStore = new Map();
 
+const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_EXPIRATION || '15m';
+const REFRESH_TOKEN_TTL = process.env.JWT_REFRESH_EXPIRATION || '7d';
+
+function resolveSecret(envKey, fallback) {
+  const secret = process.env[envKey];
+  if (secret && secret.trim()) {
+    return secret.trim();
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(`${envKey} must be set in production environment`);
+  }
+  return fallback;
+}
+
+const ACCESS_TOKEN_SECRET = resolveSecret('JWT_ACCESS_SECRET', 'development-access-secret');
+const REFRESH_TOKEN_SECRET = resolveSecret('JWT_REFRESH_SECRET', 'development-refresh-secret');
+
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeUser(userDoc) {
+  if (!userDoc) return null;
+  const user = userDoc.toObject({ virtuals: true });
+  delete user.pinHash;
+  delete user.passwordHash;
+  delete user._plainPin;
+  delete user._plainPassword;
+  user.id = String(user._id);
+  delete user._id;
+  delete user.__v;
+  return user;
+}
+
+async function findUserByCredential(identifier) {
+  if (!identifier) return null;
+  const normalizedEmployee = String(identifier).toUpperCase();
+  const normalizedUsername = String(identifier).toLowerCase();
+  return V2User.findOne({
+    $or: [
+      { employeeNumber: normalizedEmployee },
+      { username: normalizedUsername },
+      { uid: identifier }
+    ]
+  });
+}
+
+async function findUserByPin(pin) {
+  if (!pin) return null;
+  const candidates = await V2User.find({
+    pinHash: { $exists: true, $ne: null },
+    isActive: { $ne: false }
+  });
+  for (const candidate of candidates) {
+    if (await candidate.verifyPin(pin)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function isPinInUse(pin, excludeId) {
+  if (!pin) return false;
+  const query = {
+    pinHash: { $exists: true, $ne: null }
+  };
+  if (excludeId) {
+    query._id = { $ne: excludeId };
+  }
+  const candidates = await V2User.find(query);
+  for (const candidate of candidates) {
+    if (await candidate.verifyPin(pin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function generateAccessToken(user) {
+  return jwt.sign({ sub: String(user._id), role: user.role }, ACCESS_TOKEN_SECRET, {
+    expiresIn: ACCESS_TOKEN_TTL
+  });
+}
+
+function generateRefreshToken(user) {
+  return jwt.sign({ sub: String(user._id) }, REFRESH_TOKEN_SECRET, {
+    expiresIn: REFRESH_TOKEN_TTL
+  });
+}
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+  try {
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    req.user = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function jobToResponse(jobDoc) {
+  if (!jobDoc) return null;
+  const job = jobDoc.toObject({ virtuals: true });
+  job.id = String(job._id);
+  delete job._id;
+  delete job.__v;
+  return job;
+}
+
+function computeJobDuration(job, endTime = new Date()) {
+  if (!job.startTime) {
+    return job.duration || 0;
+  }
+  const end = endTime || new Date();
+  let duration = Math.round((end.getTime() - job.startTime.getTime()) / (1000 * 60));
+  if (job.pauseDuration) {
+    duration -= job.pauseDuration;
+  }
+  return Math.max(0, duration);
 }
 
 // Health check endpoint
@@ -29,15 +151,6 @@ const SERVICE_EXPECTATIONS = {
   'FCTP': { duration: 90, description: 'Ford Customer Trade Program prep' },
   'Touch-up': { duration: 30, description: 'Minor paint and interior touch-ups' }
 };
-
-// Diagnostic endpoints
-router.get('/diag', async (req, res) => {
-  const users = await V2User.find();
-  res.json({ 
-    message: 'V2 API active',
-    users: users.map(u => ({ id: u._id, name: u.name, pin: u.pin, role: u.role, employeeNumber: u.employeeNumber }))
-  });
-});
 
 // Get service expectations
 router.get('/service-expectations', (req, res) => {
@@ -228,6 +341,135 @@ router.get('/settings', async (req, res) => {
   res.json({ siteTitle, inventoryCsvUrl });
 });
 
+// Enhanced auth supporting PIN or employee number for all roles
+router.post('/auth/login', async (req, res) => {
+  try {
+    const { employeeId, pin } = req.body || {};
+    const identifier = typeof employeeId === 'string' ? employeeId.trim() : '';
+    const submittedPin = typeof pin === 'string' ? pin.trim() : identifier;
+
+    if (!submittedPin) {
+      return res.status(400).json({ error: 'PIN required' });
+    }
+
+    if (!/^[0-9]{4,8}$/.test(submittedPin)) {
+      return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+    }
+
+    let user = null;
+    if (pin && identifier) {
+      user = await findUserByCredential(identifier);
+      if (!user || !(await user.verifyPin(submittedPin))) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+    } else {
+      user = await findUserByPin(submittedPin);
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'User is inactive' });
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    const sanitizedUser = sanitizeUser(user);
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    res.json({
+      user: sanitizedUser,
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresIn: ACCESS_TOKEN_TTL,
+        refreshTokenExpiresIn: REFRESH_TOKEN_TTL
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+router.post('/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'refreshToken required' });
+  }
+
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const user = await V2User.findById(payload.sub);
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    res.json({
+      accessToken: generateAccessToken(user),
+      refreshToken: generateRefreshToken(user),
+      accessTokenExpiresIn: ACCESS_TOKEN_TTL,
+      refreshTokenExpiresIn: REFRESH_TOKEN_TTL
+    });
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// Seed initial users if none
+router.post('/seed-users', async (req, res) => {
+  try {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_V2_SEED !== 'true') {
+      return res.status(403).json({ error: 'Seeding disabled in production' });
+    }
+
+    const count = await V2User.countDocuments();
+    if (count > 0) {
+      return res.json({ seeded: false, count });
+    }
+
+    const seedUsers = [
+      { username: 'manager', name: 'Joe Gallant', role: 'manager', password: 'password', pin: '1701', employeeNumber: 'MGR001', phoneNumber: '555-0001' },
+      { pin: '1716', name: 'Alfred', role: 'detailer', uid: 'detailer-001', employeeNumber: 'DET001', phoneNumber: '555-0002' },
+      { pin: '1709', name: 'Brian', role: 'detailer', uid: 'detailer-002', employeeNumber: 'DET002', phoneNumber: '555-0003' },
+      { pin: '2001', name: 'Sarah Johnson', role: 'salesperson', employeeNumber: 'SALES001', phoneNumber: '555-0101' },
+      { pin: '2002', name: 'Mike Chen', role: 'salesperson', employeeNumber: 'SALES002', phoneNumber: '555-0102' },
+      { pin: '2003', name: 'Lisa Rodriguez', role: 'salesperson', employeeNumber: 'SALES003', phoneNumber: '555-0103' }
+    ];
+
+    for (const seed of seedUsers) {
+      const { pin: seedPin, password, username, ...rest } = seed;
+      const user = new V2User({
+        ...rest,
+        username: username ? username.toLowerCase() : undefined
+      });
+      if (seedPin) user.pin = seedPin;
+      if (password) user.password = password;
+      await user.save();
+    }
+
+    const newCount = await V2User.countDocuments();
+    res.json({ seeded: true, count: newCount });
+  } catch (error) {
+    console.error('Seed users error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.use(authenticateToken);
+
+// Diagnostic endpoints (secured)
+router.get('/diag', async (req, res) => {
+  const users = await V2User.find();
+  res.json({
+    message: 'V2 API active',
+    users: users.map(sanitizeUser)
+  });
+});
+
 router.put('/settings', async (req, res) => {
   const { key, value } = req.body || {};
   if (!key) return res.status(400).json({ error: 'key required' });
@@ -235,76 +477,64 @@ router.put('/settings', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Enhanced auth supporting PIN or employee number for all roles
-router.post('/auth/login', async (req, res) => {
-  const { employeeId } = req.body || {};
-  if (!employeeId) return res.status(400).json({ error: 'employeeId required' });
-  
-  // Find user by PIN or employee number
-  const user = await V2User.findOne({ 
-    $or: [
-      { pin: employeeId }, 
-      { employeeNumber: employeeId },
-      { username: employeeId }
-    ] 
-  });
-  
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  
-  res.json({ 
-    user: { 
-      id: String(user._id), 
-      name: user.name, 
-      role: user.role, 
-      pin: user.pin,
-      employeeNumber: user.employeeNumber,
-      phoneNumber: user.phoneNumber
-    } 
-  });
-});
-
-// Seed initial users if none
-router.post('/seed-users', async (req, res) => {
-  try {
-    const count = await V2User.countDocuments();
-    if (count > 0) return res.json({ seeded: false, count });
-    await V2User.insertMany([
-      { username: 'manager', name: 'Joe Gallant', role: 'manager', password: 'password', pin: '1701', employeeNumber: 'MGR001', phoneNumber: '555-0001' },
-      { pin: '1716', name: 'Alfred', role: 'detailer', uid: 'detailer-001', employeeNumber: 'DET001', phoneNumber: '555-0002' },
-      { pin: '1709', name: 'Brian', role: 'detailer', uid: 'detailer-002', employeeNumber: 'DET002', phoneNumber: '555-0003' },
-      { pin: '2001', name: 'Sarah Johnson', role: 'salesperson', employeeNumber: 'SALES001', phoneNumber: '555-0101' },
-      { pin: '2002', name: 'Mike Chen', role: 'salesperson', employeeNumber: 'SALES002', phoneNumber: '555-0102' },
-      { pin: '2003', name: 'Lisa Rodriguez', role: 'salesperson', employeeNumber: 'SALES003', phoneNumber: '555-0103' }
-    ]);
-    res.json({ seeded: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // Users
 router.get('/users', async (req, res) => {
   const users = await V2User.find();
-  res.json(users.map(u => ({ ...u.toObject(), id: String(u._id) })));
+  res.json(users.map(sanitizeUser));
 });
 
 router.post('/users', async (req, res) => {
-  const { name, pin } = req.body;
-  if (!name || !pin) return res.status(400).json({ error: 'name and pin are required' });
-  const exists = await V2User.findOne({ pin, role: 'detailer' });
-  if (exists) return res.status(409).json({ error: 'PIN already in use' });
-  const user = await V2User.create({ name, pin, role: 'detailer', uid: `detailer-${Date.now()}` });
-  res.status(201).json({ ...user.toObject(), id: String(user._id) });
+  const { name, pin, role = 'detailer', employeeNumber, phoneNumber, department, uid } = req.body || {};
+  if (!name || !pin) {
+    return res.status(400).json({ error: 'name and pin are required' });
+  }
+
+  if (await isPinInUse(pin)) {
+    return res.status(409).json({ error: 'PIN already in use' });
+  }
+
+  const user = new V2User({
+    name: name.trim(),
+    role,
+    employeeNumber: employeeNumber ? String(employeeNumber).toUpperCase() : undefined,
+    phoneNumber,
+    department,
+    uid: uid || (role === 'detailer' ? `detailer-${Date.now()}` : undefined)
+  });
+
+  user.pin = pin;
+  await user.save();
+
+  res.status(201).json(sanitizeUser(user));
 });
 
 router.put('/users/:id', async (req, res) => {
-  const { name, pin } = req.body;
-  const id = req.params.id;
-  const exists = await V2User.findOne({ pin, role: 'detailer', _id: { $ne: id } });
-  if (exists) return res.status(409).json({ error: 'PIN already in use' });
-  const user = await V2User.findByIdAndUpdate(id, { name, pin }, { new: true });
-  if (!user) return res.status(404).json({ error: 'Not found' });
-  res.json({ ...user.toObject(), id: String(user._id) });
+  const { name, pin, employeeNumber, phoneNumber, department, role, isActive } = req.body || {};
+  const { id } = req.params;
+
+  const user = await V2User.findById(id);
+  if (!user) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  if (pin) {
+    if (await isPinInUse(pin, id)) {
+      return res.status(409).json({ error: 'PIN already in use' });
+    }
+    user.pin = pin;
+  }
+
+  if (name !== undefined) user.name = name;
+  if (employeeNumber !== undefined) {
+    user.employeeNumber = employeeNumber ? String(employeeNumber).toUpperCase() : undefined;
+  }
+  if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+  if (department !== undefined) user.department = department;
+  if (role !== undefined) user.role = role;
+  if (typeof isActive === 'boolean') user.isActive = isActive;
+
+  await user.save();
+  res.json(sanitizeUser(user));
 });
 
 router.delete('/users/:id', async (req, res) => {
@@ -315,7 +545,7 @@ router.delete('/users/:id', async (req, res) => {
 // Jobs
 router.get('/jobs', async (req, res) => {
   const jobs = await Job.find().sort({ startTime: -1 });
-  res.json(jobs.map(j => ({ ...j.toObject(), id: String(j._id) })));
+  res.json(jobs.map(jobToResponse));
 });
 
 router.post('/jobs', async (req, res) => {
@@ -353,7 +583,7 @@ router.post('/jobs', async (req, res) => {
     };
 
     const job = await Job.create(jobData);
-    res.status(201).json({ ...job.toObject(), id: String(job._id) });
+    res.status(201).json(jobToResponse(job));
   } catch (error) {
     console.error('Job creation error:', error);
     res.status(400).json({ error: error.message || 'Failed to create job' });
@@ -364,29 +594,17 @@ router.put('/jobs/:id/complete', async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   const end = new Date();
-  // Calculate duration in minutes (not milliseconds)
-  let totalDuration = 0;
-  if (job.duration) {
-    totalDuration = job.duration;
-  } else if (job.startTime) {
-    totalDuration = Math.round((end.getTime() - job.startTime.getTime()) / (1000 * 60));
-    // Subtract any paused time
-    if (job.pausedAt && job.resumedAt) {
-      const pausedDuration = Math.round((job.resumedAt.getTime() - job.pausedAt.getTime()) / (1000 * 60));
-      totalDuration -= pausedDuration;
-    }
-  }
-  
+
   job.status = job.qcRequired ? 'QC Required' : 'Completed';
+  job.qcRequired = job.status === 'QC Required';
   job.endTime = end;
   job.completedAt = end;
-  job.duration = totalDuration;
+  job.duration = computeJobDuration(job, end);
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
-// Pause job
-router.put('/jobs/:id/pause', async (req, res) => {
+async function handlePauseJob(req, res) {
   const { reason } = req.body;
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
@@ -395,8 +613,12 @@ router.put('/jobs/:id/pause', async (req, res) => {
   job.pausedAt = new Date();
   job.pauseReason = reason || 'Paused by user';
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
-});
+  res.json(jobToResponse(job));
+}
+
+// Pause job
+router.put('/jobs/:id/pause', handlePauseJob);
+router.post('/jobs/:id/pause', handlePauseJob);
 
 // Resume job
 router.put('/jobs/:id/resume', async (req, res) => {
@@ -406,11 +628,10 @@ router.put('/jobs/:id/resume', async (req, res) => {
   job.status = 'In Progress';
   job.resumedAt = new Date();
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
-// Add technician to job
-router.put('/jobs/:id/add-technician', async (req, res) => {
+async function handleAddTechnician(req, res) {
   const { technicianId } = req.body;
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
@@ -429,32 +650,168 @@ router.put('/jobs/:id/add-technician', async (req, res) => {
   });
   
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
+}
+
+// Add technician to job
+router.put('/jobs/:id/add-technician', handleAddTechnician);
+router.post('/jobs/:id/add-technician', handleAddTechnician);
+
+router.put('/jobs/:id/status', async (req, res) => {
+  const { status, qcNotes, pauseReason } = req.body || {};
+  if (!status || typeof status !== 'string') {
+    return res.status(400).json({ error: 'status required' });
+  }
+
+  const normalizedStatus = status.trim();
+  const allowedStatuses = new Set([
+    'Pending',
+    'In Progress',
+    'Paused',
+    'Completed',
+    'QC Required',
+    'QC Approved',
+    'Cancelled'
+  ]);
+
+  if (!allowedStatuses.has(normalizedStatus)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  const job = await Job.findById(req.params.id);
+  if (!job) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const now = new Date();
+
+  switch (normalizedStatus) {
+    case 'Pending':
+      job.status = 'Pending';
+      break;
+    case 'In Progress': {
+      if (job.pausedAt) {
+        const pausedMinutes = Math.max(0, Math.round((now.getTime() - job.pausedAt.getTime()) / (1000 * 60)));
+        job.pauseDuration = (job.pauseDuration || 0) + pausedMinutes;
+        job.pausedAt = undefined;
+        job.pauseReason = undefined;
+      }
+      job.status = 'In Progress';
+      job.startTime = job.startTime || now;
+      job.resumedAt = now;
+      job.qcRequired = false;
+      break;
+    }
+    case 'Paused':
+      job.status = 'Paused';
+      job.pausedAt = now;
+      job.pauseReason = pauseReason || 'Paused by user';
+      job.resumedAt = undefined;
+      job.qcRequired = false;
+      break;
+    case 'QC Required':
+      job.status = 'QC Required';
+      job.qcRequired = true;
+      job.endTime = job.endTime || now;
+      job.completedAt = job.completedAt || now;
+      job.duration = computeJobDuration(job, job.endTime);
+      break;
+    case 'Completed':
+      job.status = 'Completed';
+      job.qcRequired = false;
+      job.endTime = now;
+      job.completedAt = now;
+      job.duration = computeJobDuration(job, now);
+      break;
+    case 'QC Approved':
+      job.status = 'QC Approved';
+      job.qcRequired = false;
+      job.endTime = now;
+      job.completedAt = now;
+      job.duration = computeJobDuration(job, now);
+      break;
+    case 'Cancelled':
+      job.status = 'Cancelled';
+      job.qcRequired = false;
+      job.endTime = now;
+      job.completedAt = now;
+      break;
+    default:
+      break;
+  }
+
+  if (qcNotes !== undefined) {
+    job.qcNotes = qcNotes;
+  }
+
+  await job.save();
+  res.json(jobToResponse(job));
 });
+
+async function handleQcCompletion(req, res) {
+  try {
+    const { employeeNumber, qcNotes, qcPassed, qcCheckerId } = req.body || {};
+    const job = await Job.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    let qcUser = null;
+    if (employeeNumber) {
+      qcUser = await V2User.findOne({ employeeNumber: String(employeeNumber).toUpperCase() });
+    }
+    if (!qcUser && qcCheckerId) {
+      qcUser =
+        (await findUserByCredential(qcCheckerId)) ||
+        (await V2User.findById(qcCheckerId));
+    }
+    if (!qcUser && req.user?.sub) {
+      qcUser = await V2User.findById(req.user.sub);
+    }
+
+    if (!qcUser || !['salesperson', 'manager'].includes(qcUser.role)) {
+      return res.status(403).json({ error: 'Only salespeople or managers can complete QC' });
+    }
+
+    const approved = qcPassed !== false;
+    const now = new Date();
+
+    if (approved) {
+      job.status = 'QC Approved';
+      job.qcRequired = false;
+      job.endTime = job.endTime || now;
+      job.completedAt = job.completedAt || now;
+      if (job.startTime) {
+        let duration = Math.round((job.endTime.getTime() - job.startTime.getTime()) / (1000 * 60));
+        if (job.pauseDuration) {
+          duration -= job.pauseDuration;
+        }
+        job.duration = Math.max(0, duration);
+      }
+    } else {
+      job.status = 'QC Required';
+      job.qcRequired = true;
+    }
+
+    job.qcCompletedBy = qcUser.name;
+    job.qcCompletedAt = now;
+    job.qcNotes = qcNotes || '';
+    job.qcEmployeeNumber = qcUser.employeeNumber;
+
+    await job.save();
+    res.json(jobToResponse(job));
+  } catch (error) {
+    console.error('QC completion error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
 
 // Complete QC
-router.put('/jobs/:id/qc-complete', async (req, res) => {
-  const { employeeNumber, qcNotes } = req.body;
-  const job = await Job.findById(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Not found' });
-  
-  const qcUser = await V2User.findOne({ employeeNumber });
-  if (!qcUser || !['salesperson', 'manager'].includes(qcUser.role)) {
-    return res.status(403).json({ error: 'Only salespeople or managers can complete QC' });
-  }
-  
-  job.status = 'QC Approved';
-  job.qcCompletedBy = qcUser.name;
-  job.qcCompletedAt = new Date();
-  job.qcNotes = qcNotes || '';
-  job.qcEmployeeNumber = employeeNumber;
-  
-  await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
-});
+router.put('/jobs/:id/qc-complete', handleQcCompletion);
+router.post('/jobs/:id/qc', handleQcCompletion);
 
 // Communication endpoints
-router.post('/jobs/:id/send-message', async (req, res) => {
+async function handleSendMessage(req, res) {
   const { message, recipientType } = req.body; // recipientType: 'salesperson' | 'detailer'
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -487,7 +844,10 @@ router.post('/jobs/:id/send-message', async (req, res) => {
     recipients: recipients.length,
     jobVin: job.vin
   });
-});
+}
+
+router.post('/jobs/:id/send-message', handleSendMessage);
+router.post('/jobs/:id/message', handleSendMessage);
 
 // Get job communications
 router.get('/jobs/:id/messages', async (req, res) => {
@@ -500,12 +860,13 @@ router.get('/jobs/:id', async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   // Minimal details/events structure expected by UI
+  const jobPayload = jobToResponse(job);
   res.json({
-    job: { ...job.toObject(), id: String(job._id) },
+    job: jobPayload,
     events: [
-      { type: 'created', timestamp: job.createdAt, userName: job.technicianName },
-      { type: 'started', timestamp: job.startTime, userName: job.technicianName },
-      ...(job.endTime ? [{ type: 'completed', timestamp: job.endTime, userName: job.technicianName }] : [])
+      { type: 'created', timestamp: jobPayload.createdAt, userName: jobPayload.technicianName },
+      { type: 'started', timestamp: jobPayload.startTime, userName: jobPayload.technicianName },
+      ...(jobPayload.endTime ? [{ type: 'completed', timestamp: jobPayload.endTime, userName: jobPayload.technicianName }] : [])
     ]
   });
 });
@@ -516,7 +877,7 @@ router.patch('/jobs/:id', async (req, res) => {
   allowed.forEach(k => { if (req.body[k] != null) updates[k] = req.body[k]; });
   const job = await Job.findByIdAndUpdate(req.params.id, updates, { new: true });
   if (!job) return res.status(404).json({ error: 'Not found' });
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
 router.put('/jobs/:id/start', async (req, res) => {
@@ -525,14 +886,14 @@ router.put('/jobs/:id/start', async (req, res) => {
   job.startTime = job.startTime || new Date();
   job.status = 'In Progress';
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
 router.put('/jobs/:id/stop', async (req, res) => {
   // Treat stop as a no-op for now (could add pause later)
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
 router.put('/jobs/:id/join', async (req, res) => {
@@ -541,7 +902,7 @@ router.put('/jobs/:id/join', async (req, res) => {
   if (!job) return res.status(404).json({ error: 'Not found' });
   if (userId && !job.assignedTechnicianIds.includes(userId)) job.assignedTechnicianIds.push(userId);
   await job.save();
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
 // Vehicles search
@@ -605,7 +966,7 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
     }
     await job.save();
   }
-  res.json({ ...job.toObject(), id: String(job._id) });
+  res.json(jobToResponse(job));
 });
 
 // Manually refresh inventory from Google Sheets CSV

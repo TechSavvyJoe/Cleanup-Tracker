@@ -11,6 +11,10 @@ const rateLimit = require('express-rate-limit');
 const Vehicle = require('./models/Vehicle');
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '', 10) || (isProduction ? 100 : 1000);
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || '', 10) || (isProduction ? 5 : 50);
+const UPLOAD_LIMIT = process.env.UPLOAD_LIMIT || '10mb';
 
 // Security and performance middleware
 app.use(helmet({
@@ -30,7 +34,7 @@ app.use(compression());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // limit each IP to 100 requests per windowMs in production
+  max: RATE_LIMIT_MAX,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: 15 * 60 * 1000
@@ -40,14 +44,14 @@ const limiter = rateLimit({
 });
 
 // Apply rate limiting to API routes (disabled in development for testing)
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use('/api/', limiter);
 }
 
 // Auth endpoints need stricter rate limiting
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 5 : 50, // limit each IP to 5 login attempts per 15 minutes in production
+  max: AUTH_RATE_LIMIT_MAX,
   message: {
     error: 'Too many authentication attempts, please try again later.',
     retryAfter: 15 * 60 * 1000
@@ -55,9 +59,10 @@ const authLimiter = rateLimit({
 });
 
 // Apply auth rate limiting only in production
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use('/api/users/login', authLimiter);
   app.use('/api/users/register', authLimiter);
+  app.use('/api/v2/auth/login', authLimiter);
 }
 
 // CORS configuration
@@ -71,8 +76,8 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+app.use(bodyParser.json({ limit: UPLOAD_LIMIT }));
+app.use(bodyParser.urlencoded({ extended: true, limit: UPLOAD_LIMIT }));
 
 // DB Config
 const configDb = require('./config/keys').mongoURI;
@@ -126,14 +131,21 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/cleanups', require('./routes/cleanups'));
 app.use('/api/v2', require('./routes/v2'));
 
+const fs = require('fs');
+
 // Serve static assets (both dev and prod)
-const clientBuildPath = path.resolve(__dirname, '..', 'client', 'build');
+// In Docker production, server.js is in /app/, so client/build is at ./client/build
+// In development, server.js is in /app/server/, so client/build is at ../client/build
+const clientBuildPath = fs.existsSync(path.join(__dirname, 'client', 'build'))
+  ? path.join(__dirname, 'client', 'build')
+  : path.resolve(__dirname, '..', 'client', 'build');
+
+console.log('Serving static files from:', clientBuildPath);
+
 app.use(express.static(clientBuildPath));
 app.get('*', (req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
-
-const fs = require('fs');
 
 // Try to listen on process.env.PORT or default 5051, increment on conflict
 let startPort = parseInt(process.env.PORT, 10) || 5051;
@@ -184,12 +196,8 @@ const maxPort = startPort + 100;
 function startServer(portToTry) {
   const serverInstance = app.listen(portToTry, () => {
     console.log(`Server started on port ${portToTry}`);
-    // write chosen port to a file so the client starter can read it
-    try {
-      fs.writeFileSync(path.join(__dirname, '.port'), String(portToTry));
-    } catch (e) {
-      console.error('Failed to write .port file:', e);
-    }
+    // Removed .port file writing as it causes permission errors in Docker
+    // and is not necessary for the application to function
   });
 
   serverInstance.on('error', err => {
@@ -211,25 +219,8 @@ function startServer(portToTry) {
 
 // startServer is invoked from main() after DB connection
 
-// Process and move the CSV file
-const csv = require('csv-parser');
-
-const csvFilePath = '../../Sales Person Used Inventory List-Mission Ford of Dearborn-2025-09-03-0404.csv';
-const newCsvFilePath = path.join(__dirname, 'data', 'inventory.csv');
-
-fs.rename(csvFilePath, newCsvFilePath, (err) => {
-  if (err) {
-    // If the file doesn't exist in the root, it might already be in the data folder
-    if (err.code === 'ENOENT') {
-      // Silent when file not present; nothing to move
-      return;
-    }
-    return console.error('Error moving CSV file:', err);
-  }
-  console.log('CSV file moved to data folder');
-});
-
 // Import Google Sheets inventory CSV at startup
+const csv = require('csv-parser');
 async function fetchAndImportInventory() {
   const SHEET_URL = process.env.INVENTORY_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv';
   console.log('Fetching inventory CSV...');
