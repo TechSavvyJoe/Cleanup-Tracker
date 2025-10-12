@@ -245,6 +245,127 @@ const V2 = axios.create({
   timeout: 10000,
 });
 
+const TOKEN_STORAGE_KEY = 'cleanupTracker.session';
+const UNAUTHORIZED_EVENT = 'cleanup-tracker:unauthorized';
+
+let refreshTokenValue = null;
+let refreshRequest = null;
+
+function setSessionTokens(tokens) {
+  if (tokens?.accessToken) {
+    V2.defaults.headers.common.Authorization = `Bearer ${tokens.accessToken}`;
+  } else {
+    delete V2.defaults.headers.common.Authorization;
+  }
+  refreshTokenValue = tokens?.refreshToken || null;
+}
+
+function clearSessionTokens() {
+  delete V2.defaults.headers.common.Authorization;
+  refreshTokenValue = null;
+}
+
+function persistSession(session) {
+  if (typeof window === 'undefined') return;
+  if (!session) {
+    window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    return;
+  }
+  window.sessionStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(session));
+}
+
+function loadStoredSession() {
+  if (typeof window === 'undefined') return null;
+  const raw = window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn('Failed to parse stored session, clearing it.', err);
+    window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    return null;
+  }
+}
+
+function emitUnauthorizedLogout() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
+}
+
+V2.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config || {};
+    if (originalRequest.__skipAuthRefresh) {
+      return Promise.reject(error);
+    }
+
+    const status = error.response?.status;
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/refresh');
+
+    if (status === 401 && refreshTokenValue && !originalRequest.__isRetryRequest && !isAuthEndpoint) {
+      if (!refreshRequest) {
+        refreshRequest = V2.post(
+          '/auth/refresh',
+          { refreshToken: refreshTokenValue },
+          { __skipAuthRefresh: true }
+        )
+          .then((res) => {
+            const tokens = {
+              accessToken: res.data?.accessToken,
+              refreshToken: res.data?.refreshToken
+            };
+            setSessionTokens(tokens);
+
+            const stored = loadStoredSession();
+            if (stored?.user) {
+              persistSession({
+                ...stored,
+                tokens: {
+                  ...stored.tokens,
+                  ...tokens
+                }
+              });
+            }
+            return tokens;
+          })
+          .catch((refreshErr) => {
+            clearSessionTokens();
+            persistSession(null);
+            emitUnauthorizedLogout();
+            throw refreshErr;
+          })
+          .finally(() => {
+            refreshRequest = null;
+          });
+      }
+
+      try {
+        await refreshRequest;
+        originalRequest.__isRetryRequest = true;
+        originalRequest.headers = originalRequest.headers || {};
+        if (V2.defaults.headers.common.Authorization) {
+          originalRequest.headers.Authorization = V2.defaults.headers.common.Authorization;
+        } else {
+          delete originalRequest.headers.Authorization;
+        }
+        return V2(originalRequest);
+      } catch (refreshErr) {
+        return Promise.reject(refreshErr);
+      }
+    }
+
+    if (status === 401 && !refreshTokenValue && !isAuthEndpoint) {
+      clearSessionTokens();
+      persistSession(null);
+      emitUnauthorizedLogout();
+    }
+
+    return Promise.reject(error);
+  }
+);
+
 // Login Component with gradient/glass theme
 function LoginForm({ onLogin }) {
   const [employeeId, setEmployeeId] = useState('');
@@ -266,22 +387,28 @@ function LoginForm({ onLogin }) {
 
   const handleSubmit = useCallback(async (e) => {
     if (e && e.preventDefault) e.preventDefault();
+
+    if (!employeeId) {
+      alert('Enter your PIN');
+      return;
+    }
+
+    if (!/^[0-9]{4,8}$/.test(employeeId)) {
+      alert('PIN must be 4 digits');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      if (!employeeId) {
-        alert('Enter your employee ID');
-        return;
-      }
-
-      // Use real API authentication
-      const response = await V2.post('/auth/login', { employeeId });
-      const user = response.data.user;
+      const response = await V2.post('/auth/login', { employeeId, pin: employeeId });
+      const session = response.data;
       
-      if (user) {
-        console.log('✅ Login successful for:', user.name);
-        onLogin(user);
+      if (session?.user && session?.tokens?.accessToken) {
+        console.log('✅ Login successful for:', session.user.name);
+        onLogin(session);
+        setEmployeeId('');
       } else {
-        alert('Invalid employee ID or PIN');
+        alert('Invalid login response from server');
       }
     } catch (err) {
       const errorMsg = err.response?.data?.error || err.message || 'Login failed';
@@ -4784,29 +4911,53 @@ export default function FirebaseV2() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
 
-  // Performance-optimized login handler
-  const handleLogin = useCallback((userData) => {
+  const handleLogin = useCallback((sessionData) => {
+    if (!sessionData?.user || !sessionData?.tokens) {
+      Logger.error('Invalid session payload received on login', null, { sessionData });
+      setError('Login failed: unexpected response');
+      return;
+    }
+
+    setSessionTokens(sessionData.tokens);
+    persistSession(sessionData);
     Logger.info('User login successful', { 
-      userId: userData?.id, 
-      role: userData?.role,
-      name: userData?.name 
+      userId: sessionData.user?.id, 
+      role: sessionData.user?.role,
+      name: sessionData.user?.name 
     });
-    setUser(userData);
+    setUser(sessionData.user);
     setError(null);
   }, []);
 
-  // Performance-optimized logout handler
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback((message) => {
     Logger.info('User logout');
+    clearSessionTokens();
+    persistSession(null);
     setUser(null);
-    setError(null);
+    setError(message || null);
   }, []);
 
-  // Enhanced error handling
   const handleError = useCallback((errorMessage, error = null) => {
     Logger.error('Application error', error, { errorMessage });
     setError(errorMessage);
   }, []);
+
+  useEffect(() => {
+    const stored = loadStoredSession();
+    if (stored?.user && stored?.tokens) {
+      setSessionTokens(stored.tokens);
+      setUser(stored.user);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onUnauthorized = () => {
+      handleLogout('Your session expired. Please sign in again.');
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [handleLogout]);
 
   // Show error with professional styling
   if (error) {

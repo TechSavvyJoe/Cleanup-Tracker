@@ -11,6 +11,10 @@ const rateLimit = require('express-rate-limit');
 const Vehicle = require('./models/Vehicle');
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '', 10) || (isProduction ? 100 : 1000);
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || '', 10) || (isProduction ? 5 : 50);
+const UPLOAD_LIMIT = process.env.UPLOAD_LIMIT || '10mb';
 
 // Security and performance middleware
 app.use(helmet({
@@ -30,7 +34,7 @@ app.use(compression());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // limit each IP to 100 requests per windowMs in production
+  max: RATE_LIMIT_MAX,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: 15 * 60 * 1000
@@ -40,14 +44,14 @@ const limiter = rateLimit({
 });
 
 // Apply rate limiting to API routes (disabled in development for testing)
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use('/api/', limiter);
 }
 
 // Auth endpoints need stricter rate limiting
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 5 : 50, // limit each IP to 5 login attempts per 15 minutes in production
+  max: AUTH_RATE_LIMIT_MAX,
   message: {
     error: 'Too many authentication attempts, please try again later.',
     retryAfter: 15 * 60 * 1000
@@ -55,9 +59,10 @@ const authLimiter = rateLimit({
 });
 
 // Apply auth rate limiting only in production
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use('/api/users/login', authLimiter);
   app.use('/api/users/register', authLimiter);
+  app.use('/api/v2/auth/login', authLimiter);
 }
 
 // CORS configuration
@@ -71,8 +76,8 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+app.use(bodyParser.json({ limit: UPLOAD_LIMIT }));
+app.use(bodyParser.urlencoded({ extended: true, limit: UPLOAD_LIMIT }));
 
 // DB Config
 const configDb = require('./config/keys').mongoURI;

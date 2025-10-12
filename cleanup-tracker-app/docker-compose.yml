@@ -34,6 +34,10 @@ services:
       - PORT=5051
       - MONGO_URI=mongodb://mongodb:27017/cleanup-tracker
       - JWT_SECRET=mdI4SE/mK5zt91zfRQ5gVSkVt/onlBoJ3Z9YDJA7oT4=
+      - JWT_ACCESS_SECRET=PK4ZpXlHCcDbBYiqMw3IT6MnWzM6Jm0VJ2diNJtRZSc=
+      - JWT_REFRESH_SECRET=IpXS636KPmb3+z/X5f6a2u+t5rggE8by3u28XdP96Cg=
+      - JWT_ACCESS_EXPIRATION=15m
+      - JWT_REFRESH_EXPIRATION=7d
       - FRONTEND_URL=http://localhost:5051,http://cleanup-tracker.local
       - INVENTORY_CSV_URL=https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv
       - RATE_LIMIT_MAX=100
