@@ -35,7 +35,10 @@ Railway is perfect for your Node.js + React application.
 3. **Set Environment Variables** in Railway dashboard:
    ```
    NODE_ENV=production
-   JWT_SECRET=your-super-secure-jwt-secret-here
+   JWT_ACCESS_SECRET=replace-with-random-string
+   JWT_REFRESH_SECRET=replace-with-another-random-string
+   JWT_ACCESS_EXPIRATION=15m
+   JWT_REFRESH_EXPIRATION=7d
    INVENTORY_CSV_URL=your-google-sheets-url (optional)
    ```
 
@@ -114,7 +117,10 @@ Set these in your hosting platform:
 NODE_ENV=production
 PORT=5051
 MONGODB_URI=your-mongodb-connection-string
-JWT_SECRET=your-super-secure-random-string
+JWT_ACCESS_SECRET=your-super-secure-access-secret
+JWT_REFRESH_SECRET=your-super-secure-refresh-secret
+JWT_ACCESS_EXPIRATION=15m
+JWT_REFRESH_EXPIRATION=7d
 INVENTORY_CSV_URL=your-google-sheets-csv-url
 CORS_ORIGIN=https://your-domain.com
 ```

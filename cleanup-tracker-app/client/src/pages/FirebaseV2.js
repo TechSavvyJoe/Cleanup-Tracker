@@ -239,11 +239,124 @@ function LiveTimer({ startTime, className = "text-lg font-mono" }) {
   return <span className={className}>{formatTime(elapsed)}</span>;
 }
 
+const TOKEN_STORAGE_KEY = 'cleanup-tracker.tokens';
+const USER_STORAGE_KEY = 'cleanup-tracker.user';
+
+const TokenManager = {
+  accessToken: null,
+  refreshToken: null,
+  loadFromStorage() {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      this.accessToken = parsed?.accessToken || null;
+      this.refreshToken = parsed?.refreshToken || null;
+    } catch (err) {
+      console.warn('Failed to load auth tokens from storage', err);
+      this.accessToken = null;
+      this.refreshToken = null;
+    }
+  },
+  setTokens(tokens) {
+    this.accessToken = tokens?.accessToken || null;
+    this.refreshToken = tokens?.refreshToken || null;
+    if (typeof window !== 'undefined') {
+      if (this.accessToken || this.refreshToken) {
+        window.localStorage.setItem(
+          TOKEN_STORAGE_KEY,
+          JSON.stringify({ accessToken: this.accessToken, refreshToken: this.refreshToken, savedAt: Date.now() })
+        );
+      } else {
+        window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+      }
+    }
+  },
+  clearTokens() {
+    this.accessToken = null;
+    this.refreshToken = null;
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+      window.dispatchEvent(new Event('cleanup-tracker:tokens-cleared'));
+    }
+  },
+  getAccessToken() {
+    return this.accessToken;
+  },
+  getRefreshToken() {
+    return this.refreshToken;
+  }
+};
+
+if (typeof window !== 'undefined') {
+  TokenManager.loadFromStorage();
+}
+
 // Create API instance with proper base URL
 const V2 = axios.create({
   baseURL: '/api/v2',
   timeout: 10000,
 });
+
+let refreshRequest = null;
+
+V2.interceptors.request.use((config) => {
+  const token = TokenManager.getAccessToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+V2.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response?.status === 401 && !originalRequest?._retry) {
+      const refreshToken = TokenManager.getRefreshToken();
+      if (!refreshToken) {
+        TokenManager.clearTokens();
+        return Promise.reject(error);
+      }
+
+      if (!refreshRequest) {
+        refreshRequest = axios
+          .post('/api/v2/auth/refresh', { refreshToken })
+          .then((res) => {
+            TokenManager.setTokens(res.data);
+            return res.data?.accessToken;
+          })
+          .catch((refreshError) => {
+            TokenManager.clearTokens();
+            if (typeof window !== 'undefined') {
+              window.localStorage.removeItem(USER_STORAGE_KEY);
+            }
+            throw refreshError;
+          })
+          .finally(() => {
+            refreshRequest = null;
+          });
+      }
+
+      try {
+        await refreshRequest;
+        originalRequest._retry = true;
+        originalRequest.headers = originalRequest.headers || {};
+        const newAccessToken = TokenManager.getAccessToken();
+        if (newAccessToken) {
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        }
+        return V2(originalRequest);
+      } catch (refreshError) {
+        return Promise.reject(refreshError);
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // Login Component with gradient/glass theme
 function LoginForm({ onLogin }) {
@@ -275,11 +388,11 @@ function LoginForm({ onLogin }) {
 
       // Use real API authentication
       const response = await V2.post('/auth/login', { employeeId });
-      const user = response.data.user;
-      
-      if (user) {
+      const { user, tokens } = response.data || {};
+
+      if (user && tokens?.accessToken) {
         console.log('✅ Login successful for:', user.name);
-        onLogin(user);
+        onLogin({ user, tokens });
       } else {
         alert('Invalid employee ID or PIN');
       }
@@ -1052,8 +1165,7 @@ function MainApp({ user, onLogout, onError }) {
     try {
       const activeJob = jobs.find(j => j.status === 'In Progress' && (
         j.assignedTechnicianIds?.includes(user.id) || 
-        j.technicianId === user.id ||
-        j.technicianId === user.pin
+        j.technicianId === user.id
       ));
       if (!activeJob) return;
       
@@ -1097,10 +1209,9 @@ function MainApp({ user, onLogout, onError }) {
   const userActiveJob = useMemo(() => 
     activeJobs.find(j => 
       j.assignedTechnicianIds?.includes(user.id) || 
-      j.technicianId === user.id ||
-      j.technicianId === user.pin
+      j.technicianId === user.id
     ), 
-    [activeJobs, user.id, user.pin]
+    [activeJobs, user.id]
   );
 
   // Performance dashboard stats with advanced analytics
@@ -1469,12 +1580,11 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
     return completedJobs.filter(j => {
       const jobDate = j.date || j.completedAt || j.startTime || j.createdAt;
       return DateUtils.isToday(jobDate) && (
-        j.assignedTechnicianIds?.includes(user.id) || 
-        j.technicianId === user.id ||
-        j.technicianId === user.pin
+        j.assignedTechnicianIds?.includes(user.id) ||
+        j.technicianId === user.id
       );
     }).length;
-  }, [completedJobs, user.id, user.pin]);
+  }, [completedJobs, user.id]);
 
   const [details, setDetails] = useState(null);
   const [elapsed, setElapsed] = useState(0); // seconds
@@ -2095,8 +2205,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               ))}
             {completedJobs.filter(job => 
               job.assignedTechnicianIds?.includes(user.id) || 
-              job.technicianId === user.id ||
-              job.technicianId === user.pin
+              job.technicianId === user.id
             ).length === 0 && (
               <div className="text-center py-12">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2524,11 +2633,11 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
               {salesPerson && (
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-blue-700 text-sm">Selected: {salesPerson}</span>
-                  {salespersons.find(p => p.name === salesPerson)?.phone && (
+                  {salespersons.find(p => p.name === salesPerson)?.phoneNumber && (
                     <button
                       type="button"
                       onClick={() => {
-                        const phone = salespersons.find(p => p.name === salesPerson)?.phone;
+                        const phone = salespersons.find(p => p.name === salesPerson)?.phoneNumber;
                         const message = `New job assigned: ${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model} - ${serviceType}`;
                         window.open(`sms:${phone}?body=${encodeURIComponent(message)}`, '_blank');
                       }}
@@ -4052,14 +4161,14 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
 
 // Users View Component
 function UsersView({ users, detailers, onDeleteUser }) {
-  const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer', phone: '' });
+  const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer', phoneNumber: '' });
   const [isAdding, setIsAdding] = useState(false);
 
   const handleAddDetailer = async (e) => {
     e.preventDefault();
     if (!newUser.name || !newUser.pin) return;
     if (newUser.pin.length !== 4) {
-      alert('PIN must be exactly 4 digits');
+      alert('Login code must be exactly 4 digits');
       return;
     }
 
@@ -4069,9 +4178,9 @@ function UsersView({ users, detailers, onDeleteUser }) {
         name: newUser.name,
         pin: newUser.pin,
         role: newUser.role,
-        phone: newUser.phone
+        phoneNumber: newUser.phoneNumber
       });
-      setNewUser({ name: '', pin: '', role: 'detailer', phone: '' });
+      setNewUser({ name: '', pin: '', role: 'detailer', phoneNumber: '' });
       alert('User added successfully');
       // FIXED: Reload users to show new team member
       window.location.reload();
@@ -4100,15 +4209,15 @@ function UsersView({ users, detailers, onDeleteUser }) {
             type="text"
             value={newUser.pin}
             onChange={(e) => setNewUser({...newUser, pin: e.target.value})}
-            placeholder="4-Digit PIN"
+            placeholder="4-Digit Login Code"
             maxLength="4"
             className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
           <input
             type="tel"
-            value={newUser.phone}
-            onChange={(e) => setNewUser({...newUser, phone: e.target.value})}
+            value={newUser.phoneNumber}
+            onChange={(e) => setNewUser({...newUser, phoneNumber: e.target.value})}
             placeholder="Phone Number (optional)"
             className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
@@ -4151,14 +4260,15 @@ function UsersView({ users, detailers, onDeleteUser }) {
                     {user.role}
                   </span>
                 </div>
-                <p className="text-gray-600 text-sm">PIN: {user.pin}</p>
-                {user.phone && (
+                <p className="text-gray-600 text-sm">Employee ID: {user.employeeNumber || 'Not Assigned'}</p>
+                <p className="text-gray-500 text-xs mt-1">Login code stored securely.</p>
+                {user.phoneNumber && (
                   <div className="flex items-center gap-2 mt-1">
-                    <p className="text-gray-600 text-sm">Phone: {user.phone}</p>
-                    <button 
+                    <p className="text-gray-600 text-sm">Phone: {user.phoneNumber}</p>
+                    <button
                       onClick={() => {
                         const message = `Hi ${user.name}, you have a new job assignment. Please check the system for details.`;
-                        window.open(`sms:${user.phone}?body=${encodeURIComponent(message)}`, '_blank');
+                        window.open(`sms:${user.phoneNumber}?body=${encodeURIComponent(message)}`, '_blank');
                       }}
                       className="text-blue-600 hover:text-blue-800 text-sm underline"
                     >
@@ -4784,13 +4894,53 @@ export default function FirebaseV2() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const storedUser = window.localStorage.getItem(USER_STORAGE_KEY);
+      if (!storedUser) return;
+      if (!TokenManager.getAccessToken()) {
+        window.localStorage.removeItem(USER_STORAGE_KEY);
+        return;
+      }
+      const parsedUser = JSON.parse(storedUser);
+      if (parsedUser?.id) {
+        setUser(parsedUser);
+      }
+    } catch (storageError) {
+      console.warn('Failed to restore user from storage', storageError);
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleTokensCleared = () => {
+      Logger.warn('Authentication tokens cleared; forcing logout');
+      setUser(null);
+      setError(null);
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(USER_STORAGE_KEY);
+      }
+    };
+    window.addEventListener('cleanup-tracker:tokens-cleared', handleTokensCleared);
+    return () => window.removeEventListener('cleanup-tracker:tokens-cleared', handleTokensCleared);
+  }, []);
+
   // Performance-optimized login handler
-  const handleLogin = useCallback((userData) => {
-    Logger.info('User login successful', { 
-      userId: userData?.id, 
+  const handleLogin = useCallback(({ user: userData, tokens }) => {
+    if (!userData) return;
+    Logger.info('User login successful', {
+      userId: userData?.id,
       role: userData?.role,
-      name: userData?.name 
+      name: userData?.name
     });
+    if (tokens) {
+      TokenManager.setTokens(tokens);
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userData));
+    }
     setUser(userData);
     setError(null);
   }, []);
@@ -4798,6 +4948,10 @@ export default function FirebaseV2() {
   // Performance-optimized logout handler
   const handleLogout = useCallback(() => {
     Logger.info('User logout');
+    TokenManager.clearTokens();
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+    }
     setUser(null);
     setError(null);
   }, []);
@@ -4965,21 +5119,25 @@ function MySettingsView({ user }) {
 
   const save = async () => {
     if (!name.trim()) return alert('Name is required');
-    
-    // Restrict PIN changes for detailers
+
+    // Restrict login code changes for detailers
     if ((user.role === 'detailer' || user.role === 'technician') && pin) {
-      return alert('PIN changes are not allowed for detailers. Contact your manager.');
+      return alert('Login code changes are not allowed for detailers. Contact your manager.');
     }
-    
-    if (pin && pin.length !== 4) return alert('PIN must be 4 digits');
+
+    if (pin && pin.length !== 4) return alert('Login code must be 4 digits');
     setSaving(true);
     try {
       // Fetch latest user from API list to get ID mapping
       const all = await V2.get('/users');
-      const me = (all.data || []).find(u => u.id === user.id || u.pin === user.pin || u.name === user.name);
+      const me = (all.data || []).find(u =>
+        u.id === user.id ||
+        (user.employeeNumber && u.employeeNumber === user.employeeNumber) ||
+        u.name === user.name
+      );
       if (!me) return alert('Cannot locate your profile');
       
-      // Only include PIN in update if user is manager
+      // Only include login code in update if user is manager
       const updateData = { name, role: me.role };
       if (user.role === 'manager' && pin) {
         updateData.pin = pin;
