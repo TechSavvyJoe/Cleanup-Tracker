@@ -5,10 +5,103 @@ const Job = require('../models/Job');
 const Vehicle = require('../models/Vehicle');
 const axios = require('axios');
 const csv = require('csv-parser');
-const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+
+const ACCESS_TOKEN_SECRET = process.env.JWT_ACCESS_SECRET || 'development-access-secret';
+const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'development-refresh-secret';
+const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_EXPIRATION || '15m';
+const REFRESH_TOKEN_TTL = process.env.JWT_REFRESH_EXPIRATION || '7d';
 
 // Simple key-value Settings in-memory (fallback) with optional Mongo storage
 const settingsStore = new Map();
+
+function generateAccessToken(user) {
+  return jwt.sign({ sub: String(user._id), role: user.role }, ACCESS_TOKEN_SECRET, {
+    expiresIn: ACCESS_TOKEN_TTL
+  });
+}
+
+function generateRefreshToken(user) {
+  return jwt.sign({ sub: String(user._id) }, REFRESH_TOKEN_SECRET, {
+    expiresIn: REFRESH_TOKEN_TTL
+  });
+}
+
+function sanitizeUser(userDoc) {
+  if (!userDoc) return null;
+  const user = userDoc.toObject({ virtuals: true });
+  return {
+    id: String(user._id),
+    name: user.name,
+    role: user.role,
+    employeeNumber: user.employeeNumber,
+    username: user.username,
+    uid: user.uid,
+    phoneNumber: user.phoneNumber,
+    department: user.department,
+    isActive: user.isActive,
+    lastLogin: user.lastLogin,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    hasPin: Boolean(user.pinHash)
+  };
+}
+
+async function isPinInUse(pin, excludeId) {
+  if (!pin) return false;
+  const query = excludeId
+    ? { _id: { $ne: excludeId }, pinHash: { $exists: true, $ne: null } }
+    : { pinHash: { $exists: true, $ne: null } };
+  const candidates = await V2User.find(query);
+  for (const candidate of candidates) {
+    if (await candidate.verifyPin(pin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function findUserByCredential(identifier) {
+  if (!identifier) return null;
+  const normalizedEmployee = String(identifier).toUpperCase();
+  const normalizedUsername = String(identifier).toLowerCase();
+
+  let user = await V2User.findOne({
+    $or: [
+      { employeeNumber: normalizedEmployee },
+      { username: normalizedUsername },
+      { uid: identifier }
+    ]
+  });
+
+  if (user) {
+    return user;
+  }
+
+  const pinCandidates = await V2User.find({ pinHash: { $exists: true, $ne: null } });
+  for (const candidate of pinCandidates) {
+    if (await candidate.verifyPin(identifier)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, ACCESS_TOKEN_SECRET, (err, payload) => {
+    if (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    req.user = payload;
+    next();
+  });
+}
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -31,14 +124,6 @@ const SERVICE_EXPECTATIONS = {
 };
 
 // Diagnostic endpoints
-router.get('/diag', async (req, res) => {
-  const users = await V2User.find();
-  res.json({ 
-    message: 'V2 API active',
-    users: users.map(u => ({ id: u._id, name: u.name, pin: u.pin, role: u.role, employeeNumber: u.employeeNumber }))
-  });
-});
-
 // Get service expectations
 router.get('/service-expectations', (req, res) => {
   res.json(SERVICE_EXPECTATIONS);
@@ -239,28 +324,96 @@ router.put('/settings', async (req, res) => {
 router.post('/auth/login', async (req, res) => {
   const { employeeId } = req.body || {};
   if (!employeeId) return res.status(400).json({ error: 'employeeId required' });
-  
-  // Find user by PIN or employee number
-  const user = await V2User.findOne({ 
-    $or: [
-      { pin: employeeId }, 
-      { employeeNumber: employeeId },
-      { username: employeeId }
-    ] 
-  });
-  
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  
-  res.json({ 
-    user: { 
-      id: String(user._id), 
-      name: user.name, 
-      role: user.role, 
-      pin: user.pin,
-      employeeNumber: user.employeeNumber,
-      phoneNumber: user.phoneNumber
-    } 
-  });
+
+  try {
+    const credential = String(employeeId).trim();
+    if (!credential) return res.status(400).json({ error: 'employeeId required' });
+
+    let user = await V2User.findOne({
+      $or: [
+        { employeeNumber: credential.toUpperCase() },
+        { username: credential.toLowerCase() },
+        { uid: credential }
+      ]
+    });
+
+    let authenticated = false;
+
+    if (user) {
+      authenticated = await user.verifyPin(credential);
+      if (!authenticated) {
+        const matchedEmployeeNumber = user.employeeNumber && user.employeeNumber === credential.toUpperCase();
+        const matchedUsername = user.username && user.username === credential.toLowerCase();
+        if (!matchedEmployeeNumber && !matchedUsername) {
+          return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        authenticated = true;
+      }
+    } else {
+      const candidate = await findUserByCredential(credential);
+      if (!candidate) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      user = candidate;
+      authenticated = await user.verifyPin(credential);
+    }
+
+    if (!authenticated || !user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'User is inactive' });
+    }
+
+    const updatedUser = await V2User.findByIdAndUpdate(
+      user._id,
+      { lastLogin: new Date() },
+      { new: true }
+    );
+
+    const accessToken = generateAccessToken(updatedUser);
+    const refreshToken = generateRefreshToken(updatedUser);
+
+    res.json({
+      user: sanitizeUser(updatedUser),
+      tokens: {
+        accessToken,
+        refreshToken,
+        accessTokenExpiresIn: ACCESS_TOKEN_TTL,
+        refreshTokenExpiresIn: REFRESH_TOKEN_TTL
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Login failed' });
+  }
+});
+
+router.post('/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'refreshToken required' });
+  }
+
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const user = await V2User.findById(payload.sub);
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
+
+    res.json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      accessTokenExpiresIn: ACCESS_TOKEN_TTL,
+      refreshTokenExpiresIn: REFRESH_TOKEN_TTL
+    });
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid refresh token' });
+  }
 });
 
 // Seed initial users if none
@@ -268,43 +421,99 @@ router.post('/seed-users', async (req, res) => {
   try {
     const count = await V2User.countDocuments();
     if (count > 0) return res.json({ seeded: false, count });
-    await V2User.insertMany([
+    const seedUsers = [
       { username: 'manager', name: 'Joe Gallant', role: 'manager', password: 'password', pin: '1701', employeeNumber: 'MGR001', phoneNumber: '555-0001' },
       { pin: '1716', name: 'Alfred', role: 'detailer', uid: 'detailer-001', employeeNumber: 'DET001', phoneNumber: '555-0002' },
       { pin: '1709', name: 'Brian', role: 'detailer', uid: 'detailer-002', employeeNumber: 'DET002', phoneNumber: '555-0003' },
       { pin: '2001', name: 'Sarah Johnson', role: 'salesperson', employeeNumber: 'SALES001', phoneNumber: '555-0101' },
       { pin: '2002', name: 'Mike Chen', role: 'salesperson', employeeNumber: 'SALES002', phoneNumber: '555-0102' },
       { pin: '2003', name: 'Lisa Rodriguez', role: 'salesperson', employeeNumber: 'SALES003', phoneNumber: '555-0103' }
-    ]);
+    ];
+
+    for (const seed of seedUsers) {
+      const { pin, password, ...rest } = seed;
+      const user = new V2User(rest);
+      if (pin) user.pin = pin;
+      if (password) user.password = password;
+      await user.save();
+    }
     res.json({ seeded: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+// Require authentication for all routes below
+router.use(authenticateToken);
+
+router.get('/diag', async (req, res) => {
+  const users = await V2User.find();
+  res.json({
+    message: 'V2 API active',
+    users: users.map(u => ({
+      id: String(u._id),
+      name: u.name,
+      role: u.role,
+      employeeNumber: u.employeeNumber,
+      hasPin: Boolean(u.pinHash)
+    }))
+  });
+});
+
 // Users
 router.get('/users', async (req, res) => {
   const users = await V2User.find();
-  res.json(users.map(u => ({ ...u.toObject(), id: String(u._id) })));
+  res.json(users.map(sanitizeUser));
 });
 
 router.post('/users', async (req, res) => {
-  const { name, pin } = req.body;
+  const { name, pin, role = 'detailer', employeeNumber, phoneNumber, department, uid } = req.body || {};
   if (!name || !pin) return res.status(400).json({ error: 'name and pin are required' });
-  const exists = await V2User.findOne({ pin, role: 'detailer' });
-  if (exists) return res.status(409).json({ error: 'PIN already in use' });
-  const user = await V2User.create({ name, pin, role: 'detailer', uid: `detailer-${Date.now()}` });
-  res.status(201).json({ ...user.toObject(), id: String(user._id) });
+
+  if (await isPinInUse(pin)) {
+    return res.status(409).json({ error: 'PIN already in use' });
+  }
+
+  const user = new V2User({
+    name,
+    role,
+    employeeNumber: employeeNumber ? String(employeeNumber).toUpperCase() : undefined,
+    phoneNumber,
+    department,
+    uid: uid || (role === 'detailer' ? `detailer-${Date.now()}` : undefined)
+  });
+
+  user.pin = pin;
+  await user.save();
+
+  res.status(201).json(sanitizeUser(user));
 });
 
 router.put('/users/:id', async (req, res) => {
-  const { name, pin } = req.body;
-  const id = req.params.id;
-  const exists = await V2User.findOne({ pin, role: 'detailer', _id: { $ne: id } });
-  if (exists) return res.status(409).json({ error: 'PIN already in use' });
-  const user = await V2User.findByIdAndUpdate(id, { name, pin }, { new: true });
+  const { name, pin, employeeNumber, phoneNumber, department, role, isActive } = req.body || {};
+  const { id } = req.params;
+
+  const user = await V2User.findById(id);
   if (!user) return res.status(404).json({ error: 'Not found' });
-  res.json({ ...user.toObject(), id: String(user._id) });
+
+  if (pin) {
+    if (await isPinInUse(pin, id)) {
+      return res.status(409).json({ error: 'PIN already in use' });
+    }
+    user.pin = pin;
+  }
+
+  if (name !== undefined) user.name = name;
+  if (employeeNumber !== undefined) {
+    user.employeeNumber = employeeNumber ? String(employeeNumber).toUpperCase() : undefined;
+  }
+  if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+  if (department !== undefined) user.department = department;
+  if (role !== undefined) user.role = role;
+  if (typeof isActive === 'boolean') user.isActive = isActive;
+
+  await user.save();
+  res.json(sanitizeUser(user));
 });
 
 router.delete('/users/:id', async (req, res) => {
@@ -577,7 +786,7 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
     const user = await V2User.findById(userId);
     const desc = v ? (v.vehicle || `${v.year} ${v.make} ${v.model}`) : 'Vehicle';
     job = await Job.create({
-      technicianId: userId || user?.pin || 'unknown',
+      technicianId: userId || String(user?._id || 'unknown'),
       technicianName: user?.name || 'Detailer',
       vin,
       stockNumber: v?.stockNumber || 'N/A',
@@ -600,7 +809,7 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
     // Also update technicianId if not set properly
     if (!job.technicianId || job.technicianId === 'unknown') {
       const user = await V2User.findById(userId);
-      job.technicianId = user?.pin || userId;
+      job.technicianId = userId;
       job.technicianName = user?.name || job.technicianName;
     }
     await job.save();

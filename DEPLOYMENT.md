@@ -12,14 +12,17 @@
 1. **Server Environment Variables** (copy from `cleanup-tracker-app/server/.env.example`):
    ```bash
    MONGO_URI=mongodb://localhost:27017/cleanup-tracker
-   JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+   JWT_ACCESS_SECRET=generate-64-byte-access-secret
+   JWT_REFRESH_SECRET=generate-64-byte-refresh-secret
+   JWT_ACCESS_EXPIRATION=15m
+   JWT_REFRESH_EXPIRATION=7d
    PORT=5051
    NODE_ENV=production
    INVENTORY_CSV_URL=https://your-google-sheets-csv-url
    ```
 
 2. **Security Requirements**:
-   - `JWT_SECRET` MUST be set to a secure random string in production
+   - `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` **must** be long, random strings in production
    - Use HTTPS in production
    - Configure CORS for your domain
 
@@ -120,8 +123,8 @@ The application includes:
    - App falls back to in-memory DB in development
 
 2. **JWT Secret Error**:
-   - Set `JWT_SECRET` environment variable in production
-   - Use a cryptographically secure random string
+   - Set both `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` in production
+   - Use cryptographically secure random strings for each value
 
 3. **Build Errors**:
    - Clear node_modules and reinstall dependencies
