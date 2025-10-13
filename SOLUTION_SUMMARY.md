@@ -60,10 +60,19 @@ When you navigate to `http://localhost:5051`, you'll see the **V2 Login Interfac
 
 ## Default Test Users
 
-You can use any of these accounts to test:
-- admin@cleanup.com (password: admin123)
-- manager@cleanup.com (password: manager123)
-- detailer@cleanup.com (password: detailer123)
+You can use any of these PINs to test the V2 login:
+
+**Managers:**
+- **PIN 1701** - Joe Gallant
+
+**Detailers:**
+- **PIN 1716** - Alfred
+- **PIN 1709** - Brian
+
+**Sales:**
+- **PIN 2001** - Sarah Johnson
+- **PIN 2002** - Mike Chen
+- **PIN 2003** - Lisa Rodriguez
 
 ## Important Notes
 

@@ -70,14 +70,21 @@ Once the server is running:
 
 ## Default Users
 
-The application seeds these default users:
+The application seeds these default test users with PINs for V2 login:
 
-1. **admin@cleanup.com** - Password: admin123
-2. **manager@cleanup.com** - Password: manager123
-3. **detailer@cleanup.com** - Password: detailer123
-4. **sales@cleanup.com** - Password: sales123
-5. **john@cleanup.com** - Password: john123
-6. **jane@cleanup.com** - Password: jane123
+**Managers:**
+- **PIN 1701** - Joe Gallant (Employee: MGR001)
+
+**Detailers:**
+- **PIN 1716** - Alfred (Employee: DET001)
+- **PIN 1709** - Brian (Employee: DET002)
+
+**Sales:**
+- **PIN 2001** - Sarah Johnson (Employee: SALES001)
+- **PIN 2002** - Mike Chen (Employee: SALES002)
+- **PIN 2003** - Lisa Rodriguez (Employee: SALES003)
+
+Simply enter the 4-digit PIN on the V2 login screen to access the system.
 
 ## Troubleshooting
 

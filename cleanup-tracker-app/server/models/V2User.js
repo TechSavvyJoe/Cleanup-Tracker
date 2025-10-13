@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const Schema = mongoose.Schema;
 
 const V2UserSchema = new Schema({
@@ -27,6 +28,9 @@ const V2UserSchema = new Schema({
         type: String,
         trim: true,
         index: true
+    },
+    pinHash: {
+        type: String
     },
     uid: {
         type: String,
@@ -64,14 +68,37 @@ const V2UserSchema = new Schema({
 V2UserSchema.index({ role: 1, isActive: 1 });
 V2UserSchema.index({ employeeNumber: 1, role: 1 });
 
-// Pre-save hook to ensure at least one identifier
-V2UserSchema.pre('save', function(next) {
+// Pre-save hook to hash PIN if it was modified
+V2UserSchema.pre('save', async function(next) {
+    // Ensure at least one identifier
     if (!this.pin && !this.employeeNumber && !this.username) {
-        next(new Error('User must have at least one identifier (pin, employeeNumber, or username)'));
-    } else {
-        next();
+        return next(new Error('User must have at least one identifier (pin, employeeNumber, or username)'));
     }
+    
+    // Hash PIN if it was modified
+    if (this.isModified('pin') && this.pin) {
+        try {
+            this.pinHash = await bcrypt.hash(this.pin, 10);
+        } catch (error) {
+            return next(error);
+        }
+    }
+    
+    next();
 });
+
+// Method to verify PIN
+V2UserSchema.methods.verifyPin = async function(pin) {
+    if (!pin || !this.pinHash) {
+        return false;
+    }
+    try {
+        return await bcrypt.compare(pin, this.pinHash);
+    } catch (error) {
+        console.error('PIN verification error:', error);
+        return false;
+    }
+};
 
 // Method to update last login
 V2UserSchema.methods.updateLastLogin = function() {
