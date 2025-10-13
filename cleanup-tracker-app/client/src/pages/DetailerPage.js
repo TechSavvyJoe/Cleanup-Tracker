@@ -66,7 +66,7 @@ const DetailerPage = ({ auth }) => {
                     {vehicle && (
                         <div>
                             <h3>{vehicle.year} {vehicle.make} {vehicle.model}</h3>
-                            <p>Stock #: {vehicle.stockNumber}</p>
+                            <p>Stock #: {vehicle.stockNumber} {vehicle.newUsed === 'N' ? '(New)' : vehicle.newUsed === 'U' ? '(Used)' : ''}</p>
                             <p>Color: {vehicle.color}</p>
                             <p>Odometer: {vehicle.odometer}</p>
                             <select value={cleanupType} onChange={(e) => setCleanupType(e.target.value)}>

@@ -68,7 +68,7 @@ router.post('/register', async (req, res) => {
             role: savedUser.role
         });
     } catch (error) {
-        console.error('Registration error:', error);
+        req.log?.error({ err: error }, 'Registration error');
         res.status(500).json({ error: 'Server error during registration' });
     }
 });
@@ -122,7 +122,7 @@ router.post('/login', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Login error:', error);
+        req.log?.error({ err: error }, 'Login error');
         res.status(500).json({ error: 'Server error during login' });
     }
 });

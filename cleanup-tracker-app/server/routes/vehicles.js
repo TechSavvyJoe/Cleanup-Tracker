@@ -21,7 +21,7 @@ router.get('/vin/:vin', async (req, res) => {
 
         res.json(vehicle);
     } catch (error) {
-        console.error('Error fetching vehicle by VIN:', error);
+        req.log?.error({ err: error }, 'Error fetching vehicle by VIN');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to fetch vehicle'
@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
 
         res.json(vehicles);
     } catch (error) {
-        console.error('Error fetching vehicles:', error);
+        req.log?.error({ err: error }, 'Error fetching vehicles');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to fetch vehicles'
@@ -182,7 +182,7 @@ router.post('/populate', async (req, res) => {
             total
         });
     } catch (error) {
-        console.error('Error populating database from CSV:', error);
+        req.log?.error({ err: error }, 'Error populating database from CSV');
         res.status(500).json({
             success: false,
             message: 'Error populating database',
@@ -199,7 +199,7 @@ router.get('/count', async (req, res) => {
         const total = await Vehicle.countDocuments();
         res.json({ total });
     } catch (error) {
-        console.error('Error counting vehicles:', error);
+        req.log?.error({ err: error }, 'Error counting vehicles');
         res.status(500).json({ error: error.message });
     }
 });
@@ -236,7 +236,7 @@ router.get('/search', async (req, res) => {
         const vehicles = await Vehicle.find(query).limit(100);
         res.json(vehicles);
     } catch (error) {
-        console.error('Error searching vehicles:', error);
+        req.log?.error({ err: error }, 'Error searching vehicles');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to search vehicles'

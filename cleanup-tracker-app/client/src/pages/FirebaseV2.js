@@ -2,6 +2,11 @@ import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'reac
 import VinScanner from '../components/VinScanner';
 import { useToast } from '../components/Toast';
 import axios from 'axios';
+import EnterpriseShell from '../components/layout/EnterpriseShell';
+import MetricCard from '../components/common/MetricCard';
+import SkeletonBlock from '../components/common/SkeletonBlock';
+import CommandPalette from '../components/CommandPalette';
+import '../styles/enterprise.css';
 
 // 🎨 Modern Design System
 
@@ -245,6 +250,9 @@ const V2 = axios.create({
   timeout: 10000,
 });
 
+const PIN_MIN_LENGTH = 4;
+const PIN_MAX_LENGTH = 8;
+
 const TOKEN_STORAGE_KEY = 'cleanupTracker.session';
 const UNAUTHORIZED_EVENT = 'cleanup-tracker:unauthorized';
 
@@ -411,7 +419,25 @@ function LoginForm({ onLogin }) {
         alert('Invalid login response from server');
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || err.message || 'Login failed';
+      const status = err.response?.status;
+      const data = err.response?.data || {};
+      let errorMsg = data.error || err.message || 'Login failed';
+
+      if (status === 423) {
+        if (data.lockedUntil) {
+          const lockedDate = new Date(data.lockedUntil);
+          if (!Number.isNaN(lockedDate.getTime())) {
+            errorMsg = `Account locked until ${lockedDate.toLocaleString()}.`;
+          } else {
+            errorMsg = 'Account temporarily locked.';
+          }
+        } else {
+          errorMsg = 'Account temporarily locked.';
+        }
+      } else if (typeof data.attemptsRemaining === 'number') {
+        errorMsg += ` (${data.attemptsRemaining} attempt${data.attemptsRemaining === 1 ? '' : 's'} remaining)`;
+      }
+
       alert(errorMsg);
     } finally {
       setIsLoading(false);
@@ -662,7 +688,7 @@ function LoginForm({ onLogin }) {
 }
 
 // Main App Component with Mobile-First Design
-function MainApp({ user, onLogout, onError }) {
+function MainApp({ user, onLogout, onError, onUserUpdate }) {
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [users, setUsers] = useState({});
@@ -676,6 +702,7 @@ function MainApp({ user, onLogout, onError }) {
   const [settings, setSettings] = useState({ siteTitle: 'Cleanup Tracker' });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [componentError, setComponentError] = useState(null);
+  const [isPaletteOpen, setPaletteOpen] = useState(false);
   
   // 🎨 Modern Theme State - Always Dark Mode
   const [theme, setTheme] = useState('dark');
@@ -686,6 +713,10 @@ function MainApp({ user, onLogout, onError }) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('app-theme', theme);
   }, [theme]);
+
+  const handleThemeToggle = useCallback(() => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
 
   // Enhanced toast toast system
   const toast = useToast();
@@ -851,6 +882,81 @@ function MainApp({ user, onLogout, onError }) {
       window.removeEventListener('offline', handleOffline);
     };
   }, [toast]);
+
+  useEffect(() => {
+    const handleHotkey = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleHotkey);
+    return () => window.removeEventListener('keydown', handleHotkey);
+  }, []);
+
+  const handleForcePinReset = useCallback(
+    async (targetUserId) => {
+      if (!targetUserId) return;
+      const normalizedId = String(targetUserId);
+      const confirmMessage = 'Generate a temporary PIN and require this team member to set a new one?';
+      if (!window.confirm(confirmMessage)) return;
+
+      try {
+        const response = await V2.post(`/users/${normalizedId}/reset-pin`);
+        const { user: updatedUser, temporaryPin } = response.data || {};
+
+        if (
+          updatedUser &&
+          updatedUser.id &&
+          typeof onUserUpdate === 'function' &&
+          updatedUser.id === user.id
+        ) {
+          onUserUpdate(updatedUser);
+        }
+
+        await loadInitialData();
+
+        if (temporaryPin) {
+          toast.success(`Temporary PIN generated: ${temporaryPin}`);
+        } else {
+          toast.success('PIN reset flagged for user.');
+        }
+      } catch (err) {
+        toast.error('Failed to reset PIN: ' + (err.response?.data?.error || err.message));
+      }
+    },
+    [loadInitialData, onUserUpdate, toast, user.id]
+  );
+
+  const handleUnlockAccount = useCallback(
+    async (targetUserId) => {
+      if (!targetUserId) return;
+      const normalizedId = String(targetUserId);
+      const confirmMessage = 'Unlock this account and reset failed login counters?';
+      if (!window.confirm(confirmMessage)) return;
+
+      try {
+        const response = await V2.post(`/users/${normalizedId}/unlock`);
+        const updatedUser = response.data;
+
+        if (
+          updatedUser &&
+          updatedUser.id &&
+          typeof onUserUpdate === 'function' &&
+          updatedUser.id === user.id
+        ) {
+          onUserUpdate(updatedUser);
+        }
+
+        await loadInitialData();
+        toast.success('Account unlocked successfully.');
+      } catch (err) {
+        toast.error('Failed to unlock account: ' + (err.response?.data?.error || err.message));
+      }
+    },
+    [loadInitialData, onUserUpdate, toast, user.id]
+  );
 
   // Load data on mount and set up auto-refresh with authentication check
   useEffect(() => {
@@ -1174,29 +1280,6 @@ function MainApp({ user, onLogout, onError }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]); // Removed loadInitialData and toast to prevent loops
 
-  // Stop work handler
-  const handleStopWork = async () => {
-    try {
-      const activeJob = jobs.find(j => j.status === 'In Progress' && (
-        j.assignedTechnicianIds?.includes(user.id) || 
-        j.technicianId === user.id ||
-        j.technicianId === user.pin
-      ));
-      if (!activeJob) return;
-      
-      // Stop timer and mark as complete with proper timing
-      await V2.put(`/jobs/${activeJob.id}/complete`, { 
-        userId: user.id,
-        completedAt: new Date().toISOString() 
-      });
-      
-      await loadInitialData(); // Reload data
-      toast.success('Job completed successfully! 🎉');
-    } catch (err) {
-      toast.error('Failed to complete job: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
   // Delete user handler
   const deleteUser = async (userId) => {
     if (!window.confirm('Are you sure you want to delete this detailer?')) return;
@@ -1220,15 +1303,49 @@ function MainApp({ user, onLogout, onError }) {
     jobs.filter(j => j.status === 'Completed' || j.status === 'QC Required'), 
     [jobs]
   );
-  
+
+  const userIdentityKeys = useMemo(() => {
+    const keys = [];
+    if (user?.id) keys.push(String(user.id));
+    if (user?.sessionPin) keys.push(String(user.sessionPin));
+    if (user?.employeeNumber) keys.push(String(user.employeeNumber));
+    return Array.from(new Set(keys.filter(Boolean)));
+  }, [user?.id, user?.sessionPin, user?.employeeNumber]);
+
+  const matchesCurrentUser = useCallback((job) => {
+    if (!job || userIdentityKeys.length === 0) return false;
+    const jobTechId = job.technicianId != null ? String(job.technicianId) : '';
+    if (jobTechId && userIdentityKeys.includes(jobTechId)) {
+      return true;
+    }
+    if (Array.isArray(job.assignedTechnicianIds)) {
+      return job.assignedTechnicianIds.some(id => userIdentityKeys.includes(String(id)));
+    }
+    return false;
+  }, [userIdentityKeys]);
+
   const userActiveJob = useMemo(() => 
-    activeJobs.find(j => 
-      j.assignedTechnicianIds?.includes(user.id) || 
-      j.technicianId === user.id ||
-      j.technicianId === user.pin
-    ), 
-    [activeJobs, user.id, user.pin]
+    activeJobs.find(job => matchesCurrentUser(job)), 
+    [activeJobs, matchesCurrentUser]
   );
+
+  // Stop work handler
+  const handleStopWork = useCallback(async () => {
+    try {
+      const activeJob = jobs.find(j => j.status === 'In Progress' && matchesCurrentUser(j));
+      if (!activeJob) return;
+
+      await V2.put(`/jobs/${activeJob.id}/complete`, { 
+        userId: user.id,
+        completedAt: new Date().toISOString() 
+      });
+
+      await loadInitialData(); // Reload data
+      toast.success('Job completed successfully! 🎉');
+    } catch (err) {
+      toast.error('Failed to complete job: ' + (err.response?.data?.error || err.message));
+    }
+  }, [jobs, matchesCurrentUser, loadInitialData, toast, user.id]);
 
   // Performance dashboard stats with advanced analytics
   const dashboardStats = useMemo(() => {
@@ -1272,30 +1389,228 @@ function MainApp({ user, onLogout, onError }) {
     [users]
   );
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-900 text-xl">Loading...</div>
-      </div>
-    );
-  }
+  const formatNumber = (value) => Number(value ?? 0).toLocaleString();
+  const formatMinutes = (value) => `${Number(value ?? 0)} min`;
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-6 border border-red-200 shadow-lg max-w-md">
-          <h2 className="text-red-800 font-semibold text-lg mb-2">Error</h2>
-          <p className="text-red-700 mb-4">{error}</p>
-          <button 
-            onClick={loadInitialData}
-            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
+  const navViews = useMemo(() => {
+    const base = [
+      {
+        id: 'dashboard',
+        label: 'Operations',
+        badge: activeJobs.length,
+        icon: (
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M2.5 3.75h5v-2h-5v2Zm0 8.5h5v-5h-5v5Zm6.75 0h5v-5h-5v5Zm0-10.5v2h5v-2h-5Z" fill="currentColor" />
+          </svg>
+        )
+      }
+    ];
+
+    if (user.role === 'manager') {
+      base.push(
+        {
+          id: 'jobs',
+          label: 'Job Board',
+          badge: jobs.length,
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M2.5 2.75h9v2.5h-9v-2.5Zm0 3.75h5.5v4h-5.5v-4Zm6.75 0h2.25v4H9.25v-4Z" fill="currentColor" />
+            </svg>
+          )
+        },
+        {
+          id: 'users',
+          label: 'Team',
+          badge: detailers.length,
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M4.5 6a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5Zm5 0A2.25 2.25 0 1 1 9.5 1.5 2.25 2.25 0 0 1 9.5 6Zm-5 1.25c-1.985 0-3.5 1.515-3.5 3.5V12h7V10.75c0-1.985-1.515-3.5-3.5-3.5Zm5 0c-.29 0-.566.04-.828.113A4.15 4.15 0 0 1 12.5 10v2h-3.5v-1.75c0-.486-.083-.95-.222-1.388.24-.24.56-.362.972-.362Z" fill="currentColor" />
+            </svg>
+          )
+        },
+        {
+          id: 'qc',
+          label: 'QC Review',
+          badge: dashboardStats.qcRequired,
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M6.3 9.3 3.7 6.7 2.5 7.9l3.8 3.8 6.2-6.2-1.2-1.2-5 5Z" fill="currentColor" />
+            </svg>
+          )
+        },
+        {
+          id: 'reports',
+          label: 'Intelligence',
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M2.5 11.5h9v-1h-9v1Zm0-8h2v5h-2v-5Zm3.5 2h2v3h-2v-3Zm3.5-2h2v5h-2v-5Z" fill="currentColor" />
+            </svg>
+          )
+        },
+        {
+          id: 'settings',
+          label: 'Controls',
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M6.125 1.75h1.75l.35 1.4a3.9 3.9 0 0 1 1.137.66l1.39-.38 1.25 1.25-.38 1.39c.266.36.5.74.66 1.137l1.401.35v1.75l-1.401.35a3.9 3.9 0 0 1-.66 1.137l.38 1.39-1.25 1.25-1.39-.38a3.9 3.9 0 0 1-1.137.66l-.35 1.401h-1.75l-.35-1.401a3.9 3.9 0 0 1-1.137-.66l-1.39.38-1.25-1.25.38-1.39a3.9 3.9 0 0 1-.66-1.137l-1.401-.35v-1.75l1.401-.35c.16-.397.394-.777.66-1.137l-.38-1.39 1.25-1.25 1.39.38c.36-.266.74-.5 1.137-.66l.35-1.4Zm.75 4.2a2.05 2.05 0 1 0 0 4.1 2.05 2.05 0 0 0 0-4.1Z" fill="currentColor" />
+            </svg>
+          )
+        }
+      );
+    } else if (user.role === 'detailer' || user.role === 'technician') {
+      base.push(
+        {
+          id: 'jobs',
+          label: 'Create Job',
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M6.5 2h1v4h4v1h-4v4h-1V7H2.5V6H6.5V2Z" fill="currentColor" />
+            </svg>
+          )
+        },
+        {
+          id: 'me',
+          label: 'My Settings',
+          icon: (
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M7 2.75a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5ZM3.5 10.5c0-1.657 1.343-3 3.5-3s3.5 1.343 3.5 3V12h-7v-1.5Z" fill="currentColor" />
+            </svg>
+          )
+        }
+      );
+    } else if (user.role === 'salesperson') {
+      base.push({
+        id: 'me',
+        label: 'My Workspace',
+        icon: (
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M7 2.75a2.25 2.25 0 1 1 0 4.5 2.25 2.25 0 0 1 0-4.5Zm-4 7.75c0-1.657 1.343-3 3.5-3s3.5 1.343 3.5 3V12h-7v-1.5Z" fill="currentColor" />
+          </svg>
+        )
+      });
+    }
+
+    return base;
+  }, [user.role, activeJobs.length, jobs.length, detailers.length, dashboardStats.qcRequired]);
+
+  const enterpriseMetrics = useMemo(() => {
+    const weeklyAvg = dashboardStats.averageTimeWeek;
+    const todaysAvg = dashboardStats.averageTimeToday;
+    const efficiency = dashboardStats.efficiency || 0;
+    return [
+      {
+        key: 'active',
+        title: 'Active Workstreams',
+        value: formatNumber(dashboardStats.totalActive),
+        description: 'Vehicles currently in progress',
+        meta: `${formatNumber(dashboardStats.qcRequired)} awaiting QC`,
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M4 3h10v5H4V3Zm0 7h5v5H4v-5Zm6.5 0H14v5h-3.5v-5Z" fill="currentColor" />
+          </svg>
+        ),
+        trend: {
+          direction: efficiency >= 100 ? 'up' : efficiency >= 90 ? 'neutral' : 'down',
+          value: `${efficiency}% efficiency`
+        }
+      },
+      {
+        key: 'completed',
+        title: 'Completed Today',
+        value: formatNumber(dashboardStats.todayCompleted),
+        description: 'Jobs finished since midnight',
+        meta: `${formatNumber(dashboardStats.weekCompleted)} this week`,
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="m7.2 12 2.1 2.1 5.5-5.5-1.1-1.1-4.4 4.4-1-1L6 11l1.2 1Z" fill="currentColor" />
+          </svg>
+        ),
+        trend: {
+          direction: 'up',
+          value: `${formatNumber(dashboardStats.totalCompleted)} total`
+        }
+      },
+      {
+        key: 'cycle',
+        title: 'Avg Cycle Time',
+        value: formatMinutes(todaysAvg),
+        description: 'Rolling daily average',
+        meta: `Weekly ${formatMinutes(weeklyAvg)}`,
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M9 3.25A5.75 5.75 0 1 1 3.25 9h1.5a4.25 4.25 0 1 0 1.2-2.96L6.5 7h-4V3l1.91 1.91A6.73 6.73 0 0 1 9 3.25Zm-.75 2.5h1.5v3.25l2.5 1.5-.75 1.3-3.25-1.95V5.75Z" fill="currentColor" />
+          </svg>
+        ),
+        trend: {
+          direction: todaysAvg <= weeklyAvg ? 'up' : 'down',
+          value: `vs ${formatMinutes(weeklyAvg)} weekly`
+        }
+      },
+      {
+        key: 'team',
+        title: 'Active Detailers',
+        value: formatNumber(detailers.length),
+        description: 'Team members logged in',
+        meta: `${formatNumber(activeJobs.length)} concurrent jobs`,
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M6 4.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm11 0a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM6.5 7.5C4.015 7.5 2 9.515 2 12v2h9v-2c0-2.485-2.015-4.5-4.5-4.5Zm5.5 1.765A4.5 4.5 0 0 1 16 13.5V14h-3v-4.735Z" fill="currentColor" />
+          </svg>
+        ),
+        trend: {
+          direction: 'neutral',
+          value: `${formatNumber(Object.keys(users || {}).length)} total users`
+        }
+      }
+    ];
+  }, [dashboardStats, detailers.length, activeJobs.length, users]);
+
+  const metricNodes = useMemo(
+    () => enterpriseMetrics.map((metric) => (
+      <MetricCard
+        key={metric.key}
+        title={metric.title}
+        value={metric.value}
+        description={metric.description}
+        icon={metric.icon}
+        meta={metric.meta}
+        trend={metric.trend}
+      />
+    )),
+    [enterpriseMetrics]
+  );
+
+  const commandItems = useMemo(() => {
+    const items = navViews.map((view) => ({
+      type: 'view',
+      value: view.id,
+      label: `Go to ${view.label}`,
+      badge: view.badge != null ? String(view.badge) : undefined
+    }));
+    items.push(
+      { type: 'action', value: 'newJob', label: 'Create new job', badge: 'Action' },
+      { type: 'action', value: 'scanner', label: 'Launch VIN scanner', badge: 'Device' },
+      { type: 'action', value: 'refresh', label: 'Refresh data', badge: 'Sync' },
+      { type: 'action', value: 'settings', label: 'Open settings', badge: 'Prefs' }
     );
-  }
+    return items;
+  }, [navViews]);
+
+  const handleCommandSelect = useCallback((item) => {
+    if (!item) return;
+    if (item.type === 'view') {
+      setView(item.value);
+    } else if (item.value === 'newJob') {
+      setView('jobs');
+    } else if (item.value === 'scanner') {
+      setShowScanner(true);
+    } else if (item.value === 'refresh') {
+      loadInitialData();
+    } else if (item.value === 'settings') {
+      setShowSettings(true);
+    }
+    setPaletteOpen(false);
+  }, [loadInitialData, setPaletteOpen, setShowSettings, setShowScanner, setView]);
 
   // Error boundary wrapper
   if (componentError) {
@@ -1323,76 +1638,157 @@ function MainApp({ user, onLogout, onError }) {
     );
   }
 
-  return (
-    <div className="min-h-screen flex flex-col" style={{
-      background: theme === 'dark' ? '#0F172A' : '#F9FAFB',
-      color: theme === 'dark' ? '#F1F5F9' : '#111827',
-      minHeight: '100vh',
-      transition: 'background-color 0.3s ease, color 0.3s ease',
-    }}>
-      {/* Network Status Indicator */}
-      {!isOnline && (
-        <div className="bg-red-600 text-white px-4 py-2 text-center text-sm font-medium">
-          <svg className="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 5.636L5.636 18.364M12 2.05v19.9M2.05 12h19.9" />
-          </svg>
-          No internet connection - working offline
-        </div>
-      )}
+  let viewContent = null;
+  if (user.role === 'detailer' || user.role === 'technician') {
+    if (view === 'dashboard') {
+      viewContent = (
+        <DetailerDashboard
+          user={user}
+          jobs={activeJobs}
+          completedJobs={completedJobs}
+          userActiveJob={userActiveJob}
+          matchesCurrentUser={matchesCurrentUser}
+          onStopWork={handleStopWork}
+          onOpenScanner={() => setShowScanner(true)}
+          onGoToNewJob={() => setView('jobs')}
+        />
+      );
+    } else if (view === 'jobs') {
+      viewContent = (
+        <DetailerNewJob
+          user={user}
+          onSearch={handleSearch}
+          searchResults={searchResults}
+          isSearching={isSearching}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          showScanner={showScanner}
+          setShowScanner={setShowScanner}
+          onScanSuccess={handleScanSuccess}
+          hasSearched={hasSearched}
+          onJobCreated={async () => {
+            await loadInitialData();
+            setView('dashboard');
+          }}
+        />
+      );
+    } else {
+      viewContent = <MySettingsView user={user} />;
+    }
+  } else if (user.role === 'manager') {
+    if (view === 'dashboard') {
+      viewContent = (
+        <ManagerDashboard
+          jobs={jobs}
+          users={users}
+          currentUser={user}
+          onRefresh={loadInitialData}
+          dashboardStats={dashboardStats}
+        />
+      );
+    } else if (view === 'jobs') {
+      viewContent = <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />;
+    } else if (view === 'qc') {
+      viewContent = <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />;
+    } else if (view === 'users') {
+      viewContent = (
+        <UsersView
+          users={users}
+          detailers={detailers}
+          onDeleteUser={deleteUser}
+          onResetPin={handleForcePinReset}
+          onUnlockAccount={handleUnlockAccount}
+        />
+      );
+    } else if (view === 'reports') {
+      viewContent = <SimpleReports jobs={jobs} users={users} theme={theme} />;
+    } else if (view === 'settings') {
+      viewContent = <SettingsView settings={settings} onSettingsChange={setSettings} />;
+    } else {
+      viewContent = <MySettingsView user={user} />;
+    }
+  } else if (user.role === 'salesperson') {
+    if (view === 'dashboard') {
+      viewContent = <SalespersonDashboard user={user} jobs={jobs} />;
+    } else {
+      viewContent = <MySettingsView user={user} />;
+    }
+  } else {
+    viewContent = <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} dashboardStats={dashboardStats} />;
+  }
 
-      {/* Modern Header with Theme Toggle */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 shadow-sm select-none" style={{
-        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
-        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
-      }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="font-bold text-lg" style={{
-              color: theme === 'dark' ? '#F1F5F9' : '#111827',
-            }}>
-              {settings.siteTitle || 'Cleanup Tracker'}
-            </h1>
-            <p className="text-sm" style={{
-              color: theme === 'dark' ? '#CBD5E1' : '#4B5563',
-            }}>
-              {user.name} • {
-                user.role === 'manager' ? 'Manager' :
-                user.role === 'admin' ? 'Admin' :
-                user.role === 'salesperson' ? 'Sales' :
-                user.role === 'technician' ? 'Technician' :
-                'Detailer'
-              }
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Settings Button */}
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-2 rounded-lg transition-all"
-              style={{
-                background: theme === 'dark' ? '#334155' : '#F3F4F6',
-                color: theme === 'dark' ? '#F1F5F9' : '#111827',
-              }}
-              title="Settings"
-            >
-              ⚙️
-            </button>
-            <button 
-              onClick={onLogout}
-              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors border"
-              style={{
-                background: theme === 'dark' ? '#7F1D1D' : '#FEF2F2',
-                color: theme === 'dark' ? '#FEE2E2' : '#B91C1C',
-                borderColor: theme === 'dark' ? '#991B1B' : '#FEE2E2',
-              }}
-            >
-              Sign Out
-            </button>
-          </div>
+  const skeletonPlaceholder = (
+    <div className="skeleton-grid">
+      {Array.from({ length: user.role === 'manager' ? 6 : 4 }).map((_, index) => (
+        <SkeletonBlock key={`skeleton-${index}`} />
+      ))}
+    </div>
+  );
+
+  const offlineBanner = !isOnline ? (
+    <GlassCard className="mb-4 p-4 border border-yellow-200 bg-yellow-50 text-yellow-800">
+      <div className="flex items-center gap-3">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M7.333 2.667h1.334v4.666H7.333V2.667Zm0 6h1.334v1.333H7.333V8.667Z" fill="currentColor" />
+          <path d="M1.333 14.667 8 1.333l6.667 13.334H1.333Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+        </svg>
+        <div>
+          <p className="font-semibold">Offline mode</p>
+          <p className="text-sm opacity-80">Changes will sync automatically when connectivity returns.</p>
         </div>
       </div>
-      
-      {/* Settings Panel */}
+    </GlassCard>
+  ) : null;
+
+  const errorBanner = error ? (
+    <GlassCard className="mb-4 border border-red-200 bg-red-50 text-red-700">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M7.333 4h1.334v5.333H7.333V4Zm0 6.667h1.334v1.333H7.333v-1.333Z" fill="currentColor" />
+          </svg>
+          <div>
+            <p className="font-semibold">{error}</p>
+            <p className="text-sm opacity-80">Try refreshing or check your network connection.</p>
+          </div>
+        </div>
+        <button type="button" className="enterprise-action" onClick={loadInitialData}>
+          Retry Sync
+        </button>
+      </div>
+    </GlassCard>
+  ) : null;
+
+  return (
+    <>
+      <EnterpriseShell
+        user={user}
+        isOnline={isOnline}
+        currentView={view}
+        onChangeView={setView}
+        views={navViews}
+        metrics={metricNodes}
+        onPrimaryAction={() => setView('jobs')}
+        onSecondaryAction={() => setShowScanner(true)}
+        onRefresh={loadInitialData}
+        onCommandPalette={() => setPaletteOpen(true)}
+        onLogout={onLogout}
+        onOpenSettings={() => setShowSettings(true)}
+        theme={theme}
+        onToggleTheme={handleThemeToggle}
+      >
+        {offlineBanner}
+        {errorBanner}
+        {loading ? skeletonPlaceholder : viewContent}
+      </EnterpriseShell>
+
+      <CommandPalette
+        open={isPaletteOpen}
+        items={commandItems}
+        onSelect={handleCommandSelect}
+        onClose={() => setPaletteOpen(false)}
+      />
+
       <SettingsPanel
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
@@ -1400,194 +1796,12 @@ function MainApp({ user, onLogout, onError }) {
         onThemeChange={setTheme}
         userRole={user.role}
       />
-
-      {/* Modern Navigation */}
-      <div className="border-b px-6 py-4 shadow-sm" style={{
-        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
-        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
-      }}>
-        <div className="flex space-x-2 overflow-x-auto">
-          <button 
-            onClick={() => setView('dashboard')} 
-            className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-              view === 'dashboard' 
-                ? 'bg-blue-500 text-white shadow-lg transform scale-105' 
-                : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
-            }`}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
-            </svg>
-            Dashboard
-          </button>
-          
-          {(user.role === 'detailer' || user.role === 'technician') ? (
-            <>
-              <button 
-                onClick={() => setView('jobs')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'jobs' 
-                    ? 'bg-green-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-green-600 hover:bg-green-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                </svg>
-                New Job
-              </button>
-              <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
-              </button>
-            </>
-          ) : user.role === 'salesperson' ? (
-            <>
-              <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
-              </button>
-            </>
-          ) : (
-            <>
-              <button 
-                onClick={() => setView('jobs')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'jobs' 
-                    ? 'bg-green-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-green-600 hover:bg-green-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                All Jobs
-              </button>
-              <button 
-                onClick={() => setView('users')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'users' 
-                    ? 'bg-indigo-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Team
-              </button>
-              <button 
-                onClick={() => setView('qc')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'qc' 
-                    ? 'bg-yellow-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-yellow-600 hover:bg-yellow-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                QC Review
-              </button>
-              <button 
-                onClick={() => setView('reports')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'reports' 
-                    ? 'bg-orange-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-orange-600 hover:bg-orange-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                Reports
-              </button>
-              <button 
-                onClick={() => setView('settings')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'settings' 
-                    ? 'bg-gray-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Settings
-              </button>
-              <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 bg-gray-50 overflow-y-auto">
-        {/* Detailer Views */}
-        {(user.role === 'detailer' || user.role === 'technician') && (
-          <>
-            {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} />}
-            {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} />}
-            {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}        {/* Manager Views */}
-    {user.role === 'manager' && (
-          <>
-            {view === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} dashboardStats={dashboardStats} />}
-            {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
-            {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
-            {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
-            {view === 'reports' && <SimpleReports jobs={jobs} users={users} theme={theme} />}
-            {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
-      {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}
-
-        {/* Salesperson Views */}
-        {user.role === 'salesperson' && (
-          <>
-            {view === 'dashboard' && <SalespersonDashboard user={user} jobs={jobs} />}
-            {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
 
 // Detailer Dashboard Component
-function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWork, onOpenScanner, onGoToNewJob }) {
+function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, matchesCurrentUser, onStopWork, onOpenScanner, onGoToNewJob }) {
   const [filterDate, setFilterDate] = useState('');
   const [filterServiceType, setFilterServiceType] = useState('');
   const [showStats, setShowStats] = useState(false);
@@ -1595,13 +1809,9 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
     if (!completedJobs || !Array.isArray(completedJobs)) return 0;
     return completedJobs.filter(j => {
       const jobDate = j.date || j.completedAt || j.startTime || j.createdAt;
-      return DateUtils.isToday(jobDate) && (
-        j.assignedTechnicianIds?.includes(user.id) || 
-        j.technicianId === user.id ||
-        j.technicianId === user.pin
-      );
+      return DateUtils.isToday(jobDate) && matchesCurrentUser(j);
     }).length;
-  }, [completedJobs, user.id, user.pin]);
+  }, [completedJobs, matchesCurrentUser]);
 
   const [details, setDetails] = useState(null);
   const [elapsed, setElapsed] = useState(0); // seconds
@@ -2220,11 +2430,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                   </div>
                 </button>
               ))}
-            {completedJobs.filter(job => 
-              job.assignedTechnicianIds?.includes(user.id) || 
-              job.technicianId === user.id ||
-              job.technicianId === user.pin
-            ).length === 0 && (
+            {completedJobs.filter(matchesCurrentUser).length === 0 && (
               <div className="text-center py-12">
                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4178,7 +4384,7 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
 }
 
 // Users View Component
-function UsersView({ users, detailers, onDeleteUser }) {
+function UsersView({ users, detailers, onDeleteUser, onResetPin, onUnlockAccount }) {
   const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer', phone: '' });
   const [isAdding, setIsAdding] = useState(false);
 
@@ -4265,10 +4471,15 @@ function UsersView({ users, detailers, onDeleteUser }) {
       <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
         <h3 className="text-gray-900 font-semibold text-lg mb-4">Team Members</h3>
         <div className="space-y-3">
-          {detailers.map(user => (
-            <div key={user.id || user._id} className="bg-gray-50 rounded-lg p-4 border border-gray-200 flex justify-between items-start">
+          {detailers.map(user => {
+            const userId = user.id || user._id;
+            const isLocked = Boolean(user.accountLocked);
+            return (
+            <div key={userId} className={`rounded-lg p-4 border flex justify-between items-start transition ${
+              isLocked ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'
+            }`}>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
                   <p className="text-gray-900 font-medium">{user.name}</p>
                   <span className={`px-2 py-1 text-xs rounded-full font-medium ${
                     user.role === 'manager' ? 'bg-purple-100 text-purple-800' :
@@ -4277,8 +4488,32 @@ function UsersView({ users, detailers, onDeleteUser }) {
                   }`}>
                     {user.role}
                   </span>
+                  {user.pinRequiresReset && (
+                    <span className="px-2 py-1 text-xs rounded-full font-medium bg-red-100 text-red-700">
+                      Reset Pending
+                    </span>
+                  )}
+                  {isLocked && (
+                    <span className="px-2 py-1 text-xs rounded-full font-medium bg-red-200 text-red-800">
+                      Locked
+                    </span>
+                  )}
                 </div>
-                <p className="text-gray-600 text-sm">PIN: {user.pin}</p>
+                <p className="text-gray-600 text-sm">
+                  PIN Hint: {user.pinPreview || 'Not set'}
+                  {user.pinUpdatedAt && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      (updated {DateUtils.formatDateTime(user.pinUpdatedAt)})
+                    </span>
+                  )}
+                </p>
+                {(user.failedLoginAttempts > 0 || isLocked) && (
+                  <p className={`text-xs mt-1 ${isLocked ? 'text-red-700' : 'text-gray-600'}`}>
+                    {isLocked
+                      ? `Account locked${user.lockedUntil ? ` until ${DateUtils.formatDateTime(user.lockedUntil)}` : ''}`
+                      : `Failed login attempts: ${user.failedLoginAttempts}`}
+                  </p>
+                )}
                 {user.phone && (
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-gray-600 text-sm">Phone: {user.phone}</p>
@@ -4294,14 +4529,33 @@ function UsersView({ users, detailers, onDeleteUser }) {
                   </div>
                 )}
               </div>
-              <button 
-                onClick={() => onDeleteUser(user.id || user._id)}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-              >
-                Delete
-              </button>
+              <div className="flex flex-col gap-2">
+                {typeof onUnlockAccount === 'function' && isLocked && (
+                  <button
+                    onClick={() => onUnlockAccount(userId)}
+                    className="bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Unlock Account
+                  </button>
+                )}
+                {typeof onResetPin === 'function' && (
+                  <button
+                    onClick={() => onResetPin(userId)}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Reset PIN
+                  </button>
+                )}
+                <button 
+                  onClick={() => onDeleteUser(userId)}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-          ))}
+          );
+        })}
         </div>
       </div>
     </div>
@@ -4910,6 +5164,11 @@ function ReportsView({ jobs = [], users = {} }) {
 export default function FirebaseV2() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
+  const [isPinResetModalOpen, setPinResetModalOpen] = useState(false);
+  const [pinResetForm, setPinResetForm] = useState({ pin: '', confirm: '' });
+  const [pinResetError, setPinResetError] = useState(null);
+  const [pinResetSubmitting, setPinResetSubmitting] = useState(false);
+  const toast = useToast();
 
   const handleLogin = useCallback((sessionData) => {
     if (!sessionData?.user || !sessionData?.tokens) {
@@ -4943,12 +5202,78 @@ export default function FirebaseV2() {
   }, []);
 
   useEffect(() => {
+    if (user?.pinRequiresReset) {
+      setPinResetModalOpen(true);
+    } else {
+      setPinResetModalOpen(false);
+      setPinResetForm({ pin: '', confirm: '' });
+      setPinResetError(null);
+    }
+  }, [user?.pinRequiresReset]);
+
+  useEffect(() => {
     const stored = loadStoredSession();
     if (stored?.user && stored?.tokens) {
       setSessionTokens(stored.tokens);
       setUser(stored.user);
     }
   }, []);
+
+  const handleUserUpdate = useCallback((updatedUser) => {
+    if (!updatedUser) return;
+    setUser(updatedUser);
+    const stored = loadStoredSession();
+    if (stored) {
+      persistSession({
+        ...stored,
+        user: updatedUser
+      });
+    }
+  }, []);
+
+  const handlePinResetInputChange = useCallback((field, value) => {
+    setPinResetForm((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  }, []);
+
+  const handlePinResetSubmit = useCallback(async (event) => {
+    event?.preventDefault();
+    if (!user) return;
+
+    const normalizedPin = String(pinResetForm.pin || '').trim();
+    const confirmPin = String(pinResetForm.confirm || '').trim();
+
+    if (normalizedPin !== confirmPin) {
+      setPinResetError('PIN entries must match');
+      return;
+    }
+
+    if (!/^[0-9]+$/.test(normalizedPin)) {
+      setPinResetError('PIN must contain digits only');
+      return;
+    }
+
+    if (normalizedPin.length < PIN_MIN_LENGTH || normalizedPin.length > PIN_MAX_LENGTH) {
+      setPinResetError(`PIN must be ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} digits long`);
+      return;
+    }
+
+    setPinResetSubmitting(true);
+    setPinResetError(null);
+
+    try {
+      const response = await V2.put(`/users/${user.id}`, { pin: normalizedPin });
+      const updatedUser = response.data;
+      handleUserUpdate(updatedUser);
+      toast.success('PIN updated successfully');
+    } catch (err) {
+      setPinResetError(err.response?.data?.error || err.message);
+    } finally {
+      setPinResetSubmitting(false);
+    }
+  }, [handleUserUpdate, pinResetForm.confirm, pinResetForm.pin, user, toast]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -4992,23 +5317,92 @@ export default function FirebaseV2() {
     );
   }
 
+  const pinResetModal = isPinResetModalOpen && user ? (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-gray-900 bg-opacity-70 backdrop-blur-sm px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 space-y-6">
+        <div className="text-center space-y-2">
+          <h2 className="text-2xl font-semibold text-gray-900">PIN Reset Required</h2>
+          <p className="text-sm text-gray-600">
+            For security, please choose a new {PIN_MIN_LENGTH}-{PIN_MAX_LENGTH} digit PIN before continuing.
+          </p>
+        </div>
+        <form className="space-y-4" onSubmit={handlePinResetSubmit}>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              value={pinResetForm.pin}
+              onChange={(e) => handlePinResetInputChange('pin', e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-lg tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="••••"
+              disabled={pinResetSubmitting}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              value={pinResetForm.confirm}
+              onChange={(e) => handlePinResetInputChange('confirm', e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-lg tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="••••"
+              disabled={pinResetSubmitting}
+            />
+          </div>
+          {pinResetError && (
+            <p className="text-sm text-red-600 text-center">{pinResetError}</p>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => handleLogout('Signed out before completing mandatory PIN reset.')}
+              className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition disabled:opacity-50"
+              disabled={pinResetSubmitting}
+            >
+              Sign Out
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition disabled:bg-blue-300"
+              disabled={pinResetSubmitting}
+            >
+              {pinResetSubmitting ? 'Saving…' : 'Save PIN'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  ) : null;
+
   // Main app render
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-900 text-xl">Loading...</div>
-      </div>
-    }>
-      {!user ? (
-        <LoginForm onLogin={handleLogin} />
+    <>
+      {pinResetModal}
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="text-gray-900 text-xl">Loading...</div>
+          </div>
+        }
+      >
+        {!user ? (
+          <LoginForm onLogin={handleLogin} />
         ) : (
-          <MainApp 
-            user={user} 
-            onLogout={handleLogout} 
+          <MainApp
+            user={user}
+            onLogout={handleLogout}
             onError={handleError}
+            onUserUpdate={handleUserUpdate}
           />
         )}
-    </Suspense>
+      </Suspense>
+    </>
   );
 }
 
@@ -5127,7 +5521,12 @@ function MySettingsView({ user }) {
     try {
       // Fetch latest user from API list to get ID mapping
       const all = await V2.get('/users');
-      const me = (all.data || []).find(u => u.id === user.id || u.pin === user.pin || u.name === user.name);
+      const me = (all.data || []).find(u => {
+        if (!u) return false;
+        if (u.id === user.id) return true;
+        if (user.employeeNumber && u.employeeNumber === user.employeeNumber) return true;
+        return false;
+      });
       if (!me) return alert('Cannot locate your profile');
       
       // Only include PIN in update if user is manager

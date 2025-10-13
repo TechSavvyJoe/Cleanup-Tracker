@@ -67,7 +67,7 @@ router.post('/start', async (req, res) => {
 
         res.status(201).json(populatedCleanup);
     } catch (error) {
-        console.error('Error starting cleanup:', error);
+        req.log?.error({ err: error }, 'Error starting cleanup');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to start cleanup'
@@ -121,7 +121,7 @@ router.post('/end/:id', async (req, res) => {
 
         res.json(populatedCleanup);
     } catch (error) {
-        console.error('Error ending cleanup:', error);
+        req.log?.error({ err: error }, 'Error ending cleanup');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to end cleanup'
@@ -168,7 +168,7 @@ router.get('/', async (req, res) => {
 
         res.json(cleanups);
     } catch (error) {
-        console.error('Error fetching cleanups:', error);
+        req.log?.error({ err: error }, 'Error fetching cleanups');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to fetch cleanups'
@@ -194,7 +194,7 @@ router.get('/:id', async (req, res) => {
 
         res.json(cleanup);
     } catch (error) {
-        console.error('Error fetching cleanup:', error);
+        req.log?.error({ err: error }, 'Error fetching cleanup');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to fetch cleanup'
@@ -213,7 +213,7 @@ router.get('/active/count', async (req, res) => {
 
         res.json({ count });
     } catch (error) {
-        console.error('Error counting active cleanups:', error);
+        req.log?.error({ err: error }, 'Error counting active cleanups');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to count active cleanups'
@@ -242,7 +242,7 @@ router.delete('/:id', async (req, res) => {
             message: 'Cleanup deleted successfully'
         });
     } catch (error) {
-        console.error('Error deleting cleanup:', error);
+        req.log?.error({ err: error }, 'Error deleting cleanup');
         res.status(500).json({
             error: 'Server error',
             message: 'Failed to delete cleanup'

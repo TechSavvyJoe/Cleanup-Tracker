@@ -6,38 +6,76 @@ const Vehicle = require('../models/Vehicle');
 const axios = require('axios');
 const csv = require('csv-parser');
 const jwt = require('jsonwebtoken');
+const config = require('../config/env');
+const logger = require('../logger');
 
 // Simple key-value Settings in-memory (fallback) with optional Mongo storage
 const settingsStore = new Map();
 
-const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_EXPIRATION || '15m';
-const REFRESH_TOKEN_TTL = process.env.JWT_REFRESH_EXPIRATION || '7d';
+const {
+  assertValidPin,
+  PIN_MIN_LENGTH,
+  PIN_MAX_LENGTH,
+  LOCK_MAX_ATTEMPTS,
+  LOCK_WINDOW_MINUTES,
+  LOCK_DURATION_MINUTES
+} = V2User;
 
-function resolveSecret(envKey, fallback) {
-  const secret = process.env[envKey];
-  if (secret && secret.trim()) {
-    return secret.trim();
-  }
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(`${envKey} must be set in production environment`);
-  }
-  return fallback;
+const ACCESS_TOKEN_TTL = config.jwtAccessExpiration;
+const REFRESH_TOKEN_TTL = config.jwtRefreshExpiration;
+const ACCESS_TOKEN_SECRET = config.jwtAccessSecret;
+const REFRESH_TOKEN_SECRET = config.jwtRefreshSecret;
+
+if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
+  throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be configured');
 }
-
-const ACCESS_TOKEN_SECRET = resolveSecret('JWT_ACCESS_SECRET', 'development-access-secret');
-const REFRESH_TOKEN_SECRET = resolveSecret('JWT_REFRESH_SECRET', 'development-refresh-secret');
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function sanitizeUser(userDoc) {
+function generateTemporaryPin() {
+  const length = Math.min(PIN_MAX_LENGTH, Math.max(PIN_MIN_LENGTH, 6));
+  let pin = '';
+  for (let i = 0; i < length; i += 1) {
+    const digit = Math.floor(Math.random() * 10);
+    if (i === 0 && digit === 0) {
+      pin += '1';
+    } else {
+      pin += String(digit);
+    }
+  }
+  return pin;
+}
+
+function sanitizeUser(userDoc, options = {}) {
   if (!userDoc) return null;
   const user = userDoc.toObject({ virtuals: true });
   delete user.pinHash;
   delete user.passwordHash;
   delete user._plainPin;
   delete user._plainPassword;
+  delete user.pin;
+  const hasPin = userDoc.hasPin?.() || Boolean(user.pinLength);
+  const pinPreview =
+    typeof user.pinLength === 'number' && user.pinLast4
+      ? `${'*'.repeat(Math.max(0, user.pinLength - user.pinLast4.length))}${user.pinLast4}`
+      : null;
+  user.hasPin = hasPin;
+  user.pinPreview = pinPreview || null;
+  user.pinLast4 = user.pinLast4 || null;
+  user.pinLength = user.pinLength || null;
+  user.pinUpdatedAt = user.pinUpdatedAt || null;
+  user.pinRequiresReset = Boolean(user.pinRequiresReset);
+  user.failedLoginAttempts = user.failedLoginAttempts || 0;
+  user.lastFailedLoginAt = user.lastFailedLoginAt || null;
+  user.lockedUntil = user.lockedUntil || null;
+  user.accountLocked = Boolean(userDoc.isAccountLocked?.());
+  if (options.sessionPin) {
+    user.sessionPin = String(options.sessionPin);
+  } else {
+    delete user.sessionPin;
+  }
   user.id = String(user._id);
   delete user._id;
   delete user.__v;
@@ -54,15 +92,23 @@ async function findUserByCredential(identifier) {
       { username: normalizedUsername },
       { uid: identifier }
     ]
-  });
+  }).select('+pinHash +pin +passwordHash');
 }
 
 async function findUserByPin(pin) {
   if (!pin) return null;
+  let normalized;
+  try {
+    normalized = assertValidPin(pin);
+  } catch (err) {
+    return null;
+  }
+  const last4 = normalized.slice(-4);
   const candidates = await V2User.find({
-    pinHash: { $exists: true, $ne: null },
+    pinLength: normalized.length,
+    pinLast4: last4,
     isActive: { $ne: false }
-  });
+  }).select('+pinHash +pin');
   for (const candidate of candidates) {
     if (await candidate.verifyPin(pin)) {
       return candidate;
@@ -73,15 +119,22 @@ async function findUserByPin(pin) {
 
 async function isPinInUse(pin, excludeId) {
   if (!pin) return false;
+  let normalized;
+  try {
+    normalized = assertValidPin(pin);
+  } catch (err) {
+    return false;
+  }
   const query = {
-    pinHash: { $exists: true, $ne: null }
+    pinLength: normalized.length,
+    pinLast4: normalized.slice(-4)
   };
   if (excludeId) {
     query._id = { $ne: excludeId };
   }
-  const candidates = await V2User.find(query);
+  const candidates = await V2User.find(query).select('+pinHash +pin');
   for (const candidate of candidates) {
-    if (await candidate.verifyPin(pin)) {
+    if (await candidate.verifyPin(normalized)) {
       return true;
     }
   }
@@ -329,7 +382,7 @@ router.get('/reports', async (req, res) => {
       dailyTrends
     });
   } catch (error) {
-    console.error('Reports error:', error);
+    req.log?.error({ err: error }, 'Reports error');
     res.status(500).json({ error: error.message });
   }
 });
@@ -352,21 +405,81 @@ router.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'PIN required' });
     }
 
-    if (!/^[0-9]{4,8}$/.test(submittedPin)) {
-      return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+    let normalizedPin;
+    try {
+      normalizedPin = assertValidPin(submittedPin);
+    } catch (validationError) {
+      return res.status(400).json({ error: validationError.message });
     }
 
     let user = null;
+    const lockSettings = {
+      maxAttempts: LOCK_MAX_ATTEMPTS,
+      windowMinutes: LOCK_WINDOW_MINUTES,
+      lockDurationMinutes: LOCK_DURATION_MINUTES
+    };
+
     if (pin && identifier) {
-      user = await findUserByCredential(identifier);
-      if (!user || !(await user.verifyPin(submittedPin))) {
+      const candidate = await findUserByCredential(identifier);
+      if (!candidate) {
+        req.log?.warn({ identifier }, 'Login failed: unknown identifier');
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+
+      if (candidate.isAccountLocked()) {
+        req.log?.warn(
+          { identifier, lockedUntil: candidate.lockedUntil },
+          'Login attempt on locked account'
+        );
+        return res.status(423).json({
+          error: 'Account locked',
+          lockedUntil: candidate.lockedUntil,
+          attemptsRemaining: 0,
+          locked: true
+        });
+      }
+
+      const pinValid = await candidate.verifyPin(normalizedPin);
+      if (!pinValid) {
+        const lockResult = candidate.recordFailedLogin(lockSettings);
+        await candidate.save();
+        req.log?.warn(
+          {
+            identifier,
+            locked: lockResult.locked,
+            attemptsRemaining: Math.max(0, lockResult.maxAttempts - lockResult.attempts)
+          },
+          'Invalid PIN submitted'
+        );
+        return res.status(lockResult.locked ? 423 : 401).json({
+          error: lockResult.locked ? 'Account locked' : 'Invalid credentials',
+          lockedUntil: lockResult.lockedUntil,
+          attemptsRemaining: Math.max(0, lockResult.maxAttempts - lockResult.attempts),
+          locked: lockResult.locked
+        });
+      }
+
+      candidate.resetFailedLogin();
+      user = candidate;
     } else {
-      user = await findUserByPin(submittedPin);
+      user = await findUserByPin(normalizedPin);
       if (!user) {
+        req.log?.warn({ pin: normalizedPin.slice(-4) }, 'Login failed via PIN');
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+      if (user.isAccountLocked()) {
+        req.log?.warn(
+          { userId: user.id, lockedUntil: user.lockedUntil },
+          'Login attempt on locked account via PIN'
+        );
+        return res.status(423).json({
+          error: 'Account locked',
+          lockedUntil: user.lockedUntil,
+          attemptsRemaining: 0,
+          locked: true
+        });
+      }
+      user.resetFailedLogin();
     }
 
     if (!user.isActive) {
@@ -376,11 +489,11 @@ router.post('/auth/login', async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
 
-    const sanitizedUser = sanitizeUser(user);
+    const sanitizedUser = sanitizeUser(user, { sessionPin: normalizedPin });
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.json({
+    const responsePayload = {
       user: sanitizedUser,
       tokens: {
         accessToken,
@@ -388,9 +501,14 @@ router.post('/auth/login', async (req, res) => {
         accessTokenExpiresIn: ACCESS_TOKEN_TTL,
         refreshTokenExpiresIn: REFRESH_TOKEN_TTL
       }
-    });
+    };
+    if (user.isAccountLocked()) {
+      responsePayload.user.accountLocked = true;
+    }
+    req.log?.info({ userId: user.id, role: user.role }, 'Login successful');
+    res.json(responsePayload);
   } catch (error) {
-    console.error('Login error:', error);
+    req.log?.error({ err: error }, 'Login error');
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -446,15 +564,15 @@ router.post('/seed-users', async (req, res) => {
         ...rest,
         username: username ? username.toLowerCase() : undefined
       });
-      if (seedPin) user.pin = seedPin;
-      if (password) user.password = password;
+      if (seedPin) await user.setPin(seedPin);
+      if (password) await user.setPassword(password);
       await user.save();
     }
 
     const newCount = await V2User.countDocuments();
     res.json({ seeded: true, count: newCount });
   } catch (error) {
-    console.error('Seed users error:', error);
+    logger.error({ err: error }, 'Seed users error');
     res.status(500).json({ error: error.message });
   }
 });
@@ -502,8 +620,18 @@ router.post('/users', async (req, res) => {
     uid: uid || (role === 'detailer' ? `detailer-${Date.now()}` : undefined)
   });
 
-  user.pin = pin;
-  await user.save();
+  try {
+    await user.setPin(pin);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  try {
+    await user.save();
+  } catch (err) {
+    req.log?.error({ err }, 'Create user failed');
+    return res.status(500).json({ error: 'Failed to create user' });
+  }
 
   res.status(201).json(sanitizeUser(user));
 });
@@ -514,6 +642,7 @@ router.put('/users/:id', async (req, res) => {
 
   const user = await V2User.findById(id);
   if (!user) {
+    logger.warn({ userId: id }, 'User update attempted on missing user');
     return res.status(404).json({ error: 'Not found' });
   }
 
@@ -521,7 +650,11 @@ router.put('/users/:id', async (req, res) => {
     if (await isPinInUse(pin, id)) {
       return res.status(409).json({ error: 'PIN already in use' });
     }
-    user.pin = pin;
+    try {
+      await user.setPin(pin);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
   }
 
   if (name !== undefined) user.name = name;
@@ -533,7 +666,71 @@ router.put('/users/:id', async (req, res) => {
   if (role !== undefined) user.role = role;
   if (typeof isActive === 'boolean') user.isActive = isActive;
 
+  try {
+    await user.save();
+  } catch (err) {
+    req.log?.error({ err }, 'Update user failed');
+    return res.status(500).json({ error: 'Failed to update user' });
+  }
+  res.json(sanitizeUser(user));
+});
+
+router.post('/users/:id/reset-pin', async (req, res) => {
+  const actingUserId = req.user?.sub;
+  if (!actingUserId) {
+    return res.status(403).json({ error: 'Not authorized' });
+  }
+
+  const actingUser = await V2User.findById(actingUserId);
+  if (!actingUser || actingUser.role !== 'manager') {
+    return res.status(403).json({ error: 'Only managers may reset PINs' });
+  }
+
+  const user = await V2User.findById(req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const requestedPin = typeof req.body?.newPin === 'string' ? req.body.newPin.trim() : '';
+  const pinToSet = requestedPin || generateTemporaryPin();
+
+  try {
+    await user.setPin(pinToSet, { forceReset: true });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  user.resetFailedLogin();
   await user.save();
+
+  res.json({
+    user: sanitizeUser(user),
+    temporaryPin: pinToSet,
+    autogenerated: !requestedPin
+  });
+});
+
+router.post('/users/:id/unlock', async (req, res) => {
+  const actingUserId = req.user?.sub;
+  if (!actingUserId) {
+    return res.status(403).json({ error: 'Not authorized' });
+  }
+
+  const actingUser = await V2User.findById(actingUserId);
+  if (!actingUser || actingUser.role !== 'manager') {
+    return res.status(403).json({ error: 'Only managers may unlock accounts' });
+  }
+
+  const user = await V2User.findById(req.params.id);
+  if (!user) {
+    logger.warn({ userId: req.params.id }, 'Unlock attempted for missing user');
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  user.resetFailedLogin();
+  await user.save();
+
+  req.log?.info({ userId: user.id }, 'User account unlocked');
   res.json(sanitizeUser(user));
 });
 
@@ -585,7 +782,7 @@ router.post('/jobs', async (req, res) => {
     const job = await Job.create(jobData);
     res.status(201).json(jobToResponse(job));
   } catch (error) {
-    console.error('Job creation error:', error);
+    req.log?.error({ err: error }, 'Job creation error');
     res.status(400).json({ error: error.message || 'Failed to create job' });
   }
 });
@@ -801,7 +998,7 @@ async function handleQcCompletion(req, res) {
     await job.save();
     res.json(jobToResponse(job));
   } catch (error) {
-    console.error('QC completion error:', error);
+    req.log?.error({ err: error }, 'QC completion error');
     res.status(500).json({ error: error.message });
   }
 }
@@ -831,12 +1028,15 @@ async function handleSendMessage(req, res) {
   
   // In a real implementation, integrate with SMS service like Twilio
   // For now, we'll just log the message and return success
-  console.log('SMS would be sent:', {
-    message,
-    recipients: recipients.map(r => ({ name: r.name, phone: r.phoneNumber })),
-    jobId: job._id,
-    vin: job.vin
-  });
+  logger.info(
+    {
+      message,
+      recipients: recipients.map((recipient) => ({ name: recipient.name, phone: recipient.phoneNumber })),
+      jobId: job._id,
+      vin: job.vin
+    },
+    'Simulated SMS dispatch'
+  );
   
   res.json({ 
     success: true, 
@@ -935,10 +1135,11 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
   if (!job) {
     // try to find vehicle to prefill description/stock and user info
     const v = await Vehicle.findOne({ vin });
-    const user = await V2User.findById(userId);
+    const user = userId ? await V2User.findById(userId) : null;
     const desc = v ? (v.vehicle || `${v.year} ${v.make} ${v.model}`) : 'Vehicle';
+    const resolvedTechnicianId = user ? String(user._id) : (userId ? String(userId) : 'unknown');
     job = await Job.create({
-      technicianId: userId || user?.pin || 'unknown',
+      technicianId: resolvedTechnicianId,
       technicianName: user?.name || 'Detailer',
       vin,
       stockNumber: v?.stockNumber || 'N/A',
@@ -952,16 +1153,22 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
       startTime: new Date(),
       status: 'In Progress',
       date: new Date().toISOString().slice(0,10),
-      assignedTechnicianIds: userId ? [userId] : [],
+      assignedTechnicianIds: resolvedTechnicianId && resolvedTechnicianId !== 'unknown' ? [resolvedTechnicianId] : [],
       priority: 'Normal',
       salesPerson: ''
     });
-  } else if (userId && !job.assignedTechnicianIds.includes(userId)) {
-    job.assignedTechnicianIds.push(userId);
+  } else if (userId) {
+    const normalizedUserId = String(userId);
+    if (!Array.isArray(job.assignedTechnicianIds)) {
+      job.assignedTechnicianIds = [];
+    }
+    if (!job.assignedTechnicianIds.includes(normalizedUserId)) {
+      job.assignedTechnicianIds.push(normalizedUserId);
+    }
     // Also update technicianId if not set properly
     if (!job.technicianId || job.technicianId === 'unknown') {
       const user = await V2User.findById(userId);
-      job.technicianId = user?.pin || userId;
+      job.technicianId = user ? String(user._id) : normalizedUserId;
       job.technicianName = user?.name || job.technicianName;
     }
     await job.save();
@@ -1000,7 +1207,7 @@ router.post('/vehicles/refresh', async (req, res) => {
     const total = await Vehicle.countDocuments();
     res.json({ success: true, upserted: result.upsertedCount || 0, modified: result.modifiedCount || 0, total });
   } catch (e) {
-    console.error('Refresh inventory failed:', e);
+    req.log?.error({ err: e }, 'Refresh inventory failed');
     res.status(500).json({ success: false, message: e.message });
   }
 });
