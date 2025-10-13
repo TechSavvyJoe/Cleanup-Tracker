@@ -5,19 +5,8 @@ const Landing = () => {
     return (
         <div className="container" style={{ textAlign: 'center', padding: '2rem' }}>
             <h1>Welcome to the Cleanup Tracker</h1>
-            <p>Please login to continue or use the new V2 interface.</p>
+            <p>Please login to continue.</p>
             <div style={{ margin: '2rem 0' }}>
-                <Link to="/login" style={{ 
-                    display: 'inline-block', 
-                    margin: '0 1rem', 
-                    padding: '0.5rem 1rem', 
-                    backgroundColor: '#007bff', 
-                    color: 'white', 
-                    textDecoration: 'none', 
-                    borderRadius: '4px' 
-                }}>
-                    Login (Original)
-                </Link>
                 <Link to="/v2" style={{ 
                     display: 'inline-block', 
                     margin: '0 1rem', 
@@ -27,7 +16,7 @@ const Landing = () => {
                     textDecoration: 'none', 
                     borderRadius: '4px' 
                 }}>
-                    V2 Interface
+                    Login
                 </Link>
             </div>
         </div>

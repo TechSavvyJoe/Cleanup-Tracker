@@ -167,7 +167,13 @@ async function seedUsersIfNeeded() {
     { name: "Mike Chen", role: "salesperson", pin: "2002", employeeNumber: "SALES002", phoneNumber: "555-0102" },
     { name: "Lisa Rodriguez", role: "salesperson", pin: "2003", employeeNumber: "SALES003", phoneNumber: "555-0103" }
   ];
-  await V2User.insertMany(defaultUsers);
+  
+  // Use save() instead of insertMany() to trigger pre-save hooks for PIN hashing
+  for (const userData of defaultUsers) {
+    const user = new V2User(userData);
+    await user.save();
+  }
+  
   console.log(`Seeded ${defaultUsers.length} default users`);
 }
 
