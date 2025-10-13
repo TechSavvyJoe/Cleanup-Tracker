@@ -357,12 +357,16 @@ router.post('/auth/login', async (req, res) => {
     }
 
     let user = null;
-    if (pin && identifier) {
+    
+    // If both employeeId and pin are provided AND they're different, use credential-based login
+    // If they're the same (or only pin is provided), use PIN-only login
+    if (pin && identifier && identifier !== submittedPin) {
       user = await findUserByCredential(identifier);
       if (!user || !(await user.verifyPin(submittedPin))) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
     } else {
+      // PIN-only login (or both fields have same value)
       user = await findUserByPin(submittedPin);
       if (!user) {
         return res.status(401).json({ error: 'Invalid credentials' });
