@@ -197,6 +197,27 @@ const DateUtils = {
   }
 };
 
+// Shared helper to consistently select the preferred job start timestamp
+function getJobStartTime(job) {
+  if (!job) return null;
+
+  const candidates = [
+    job.startTime,
+    job.startedAt,
+    job.started_at,
+    job.metadata?.startTime,
+    job.metadata?.startedAt
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && !isNaN(new Date(candidate).getTime())) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 // Enhanced Live Timer Component with error handling
 function LiveTimer({ startTime, className = "text-lg font-mono" }) {
   const [elapsed, setElapsed] = useState(0);
@@ -1247,13 +1268,16 @@ function MainApp({ user, onLogout, onError }) {
     // Calculate efficiency metrics
     const calculateAverageTime = (jobList) => {
       if (jobList.length === 0) return 0;
-      const totalTime = jobList.reduce((sum, job) => {
-        if (job.startedAt && job.completedAt) {
-          return sum + (new Date(job.completedAt) - new Date(job.startedAt));
+
+      const totalMinutes = jobList.reduce((sum, job) => {
+        const startTime = getJobStartTime(job);
+        if (startTime && job.completedAt) {
+          return sum + DateUtils.calculateDuration(startTime, job.completedAt);
         }
         return sum;
       }, 0);
-      return Math.round(totalTime / jobList.length / (1000 * 60)); // Convert to minutes
+
+      return Math.round(totalMinutes / jobList.length);
     };
 
     return {
@@ -1267,10 +1291,12 @@ function MainApp({ user, onLogout, onError }) {
       qcRequired: jobs.filter(job => job.status === 'QC Required').length
     };
   }, [activeJobs, completedJobs, jobs]);
-  const detailers = useMemo(() => 
-    Object.values(users).filter(u => u.role === 'detailer'), 
+  const detailers = useMemo(() =>
+    Object.values(users).filter(u => u.role === 'detailer'),
     [users]
   );
+
+  const jobDetailsStartTime = useMemo(() => getJobStartTime(jobDetails?.job), [jobDetails]);
 
   if (loading) {
     return (
@@ -2145,7 +2171,9 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                 return true;
               })
               .slice(0, 10)
-              .map(job => (
+              .map(job => {
+                const jobStartTime = getJobStartTime(job);
+                return (
                 <button
                   key={job.id}
                   onClick={() => openJobDetails(job)}
@@ -2187,8 +2215,8 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                         <p className="text-purple-700 font-semibold text-sm mb-2">Sales: {job.salesPerson}</p>
                       )}
                       <div className="text-sm text-gray-600">
-                        {job.startTime && (
-                          <p>Started: {DateUtils.formatDateTime(job.startTime)}</p>
+                        {jobStartTime && (
+                          <p>Started: {DateUtils.formatDateTime(jobStartTime)}</p>
                         )}
                         {job.completedAt && (
                           <p>Completed: {DateUtils.formatDateTime(job.completedAt)}</p>
@@ -2203,12 +2231,12 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                       }`}>
                         {job.status}
                       </span>
-                      {job.completedAt && (job.startTime || job.startedAt) && (
+                      {job.completedAt && jobStartTime && (
                         <div className="bg-green-50 rounded-2xl p-4 text-center">
                           <p className="text-green-700 font-bold text-2xl">
                             {DateUtils.formatDuration(
                               DateUtils.calculateDuration(
-                                job.startTime || job.startedAt, 
+                                jobStartTime,
                                 job.completedAt
                               )
                             )}
@@ -2219,7 +2247,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                     </div>
                   </div>
                 </button>
-              ))}
+              )})
             {completedJobs.filter(job => 
               job.assignedTechnicianIds?.includes(user.id) || 
               job.technicianId === user.id ||
@@ -2335,13 +2363,13 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                       }`}>
                         {jobDetails.job?.status}
                       </div>
-                      {jobDetails.job?.startTime && (
+                      {jobDetailsStartTime && (
                         <div className="space-y-1 text-xs">
-                          <p className="text-gray-600">Started: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.startTime).toLocaleTimeString()}</span></p>
+                          <p className="text-gray-600">Started: <span className="text-gray-900 font-medium">{new Date(jobDetailsStartTime).toLocaleTimeString()}</span></p>
                           {jobDetails.job?.status === 'In Progress' && (
                             <div>
                               <p className="text-gray-600 mb-1">Duration:</p>
-                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-700 font-mono text-xl font-bold" />
+                              <LiveTimer startTime={jobDetailsStartTime} className="text-yellow-700 font-mono text-xl font-bold" />
                             </div>
                           )}
                           {jobDetails.job?.completedAt && (
@@ -2349,7 +2377,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                               <p className="text-gray-600">Completed: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.completedAt).toLocaleTimeString()}</span></p>
                               <p className="text-green-700 text-base font-bold mt-1">
                                 {DateUtils.formatDuration(
-                                  DateUtils.calculateDuration(jobDetails.job.startTime, jobDetails.job.completedAt)
+                                  DateUtils.calculateDuration(jobDetailsStartTime, jobDetails.job.completedAt)
                                 )}
                               </p>
                             </div>
@@ -2370,11 +2398,11 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                     Activity Timeline
                   </h5>
                   <ul className="space-y-2 max-h-36 overflow-auto pr-1">
-                    {jobDetails.job?.startTime && (
+                    {jobDetailsStartTime && (
                       <li className="text-xs border-l-2 border-green-500 pl-2 py-1">
                         <span className="text-green-700 font-semibold">Started</span>
                         <span className="text-gray-500 block text-[11px]">
-                          {DateUtils.formatDateTime(jobDetails.job.startTime)}
+                          {DateUtils.formatDateTime(jobDetailsStartTime)}
                           {jobDetails.job?.technicianName && ` • ${jobDetails.job.technicianName}`}
                         </span>
                       </li>
@@ -2402,7 +2430,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                         </li>
                       );
                     })}
-                    {(!jobDetails.job?.startTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
+                    {(!jobDetailsStartTime && (!jobDetails.events || jobDetails.events.length === 0)) && (
                       <li className="text-gray-500 text-xs italic">No activity recorded</li>
                     )}
                   </ul>
@@ -2934,20 +2962,20 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
   const filteredJobs = useMemo(() => {
     return jobs.filter(job => {
       // Check multiple possible date fields for comprehensive coverage
-      const possibleDates = [
-        job.date,
-        job.startTime,
-        job.startedAt,
-        job.createdAt,
-        job.timestamp,
-        job.completedAt
-      ].filter(d => d && DateUtils.isValidDate(d));
-      
-      if (possibleDates.length === 0) return dateFilter === 'all';
-      
-      // Use the most relevant date (prefer start times, then creation times)
-      const jobDate = job.startTime || job.startedAt || job.createdAt || 
-                     job.timestamp || job.date || possibleDates[0];
+        const preferredStart = getJobStartTime(job);
+        const possibleDates = [
+          job.date,
+          preferredStart,
+          job.createdAt,
+          job.timestamp,
+          job.completedAt
+        ].filter(d => d && DateUtils.isValidDate(d));
+
+        if (possibleDates.length === 0) return dateFilter === 'all';
+
+        // Use the most relevant date (prefer start times, then creation times)
+        const jobDate = preferredStart || job.createdAt ||
+                       job.timestamp || job.date || possibleDates[0];
       
       switch (dateFilter) {
         case 'today':
@@ -3014,10 +3042,10 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
     }
     
     // Fallback to local calculation
-    const todayJobs = jobs.filter(job => {
-      const jobDate = job.date || job.startTime || job.createdAt || job.timestamp;
-      return DateUtils.isToday(jobDate);
-    });
+      const todayJobs = jobs.filter(job => {
+        const jobDate = job.date || getJobStartTime(job) || job.createdAt || job.timestamp;
+        return DateUtils.isToday(jobDate);
+      });
     
     const activeJobs = filteredJobs.filter(j => j.status === 'In Progress');
     const completedJobs = filteredJobs.filter(j => j.status === 'Completed');
@@ -3194,8 +3222,10 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
       <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
         <h3 className="text-gray-900 font-semibold text-lg mb-4">Jobs In Progress</h3>
         <div className="space-y-4">
-          {filteredJobs.filter(job => job.status === 'In Progress' || job.status === 'in_progress').map(job => (
-            <button
+          {filteredJobs.filter(job => job.status === 'In Progress' || job.status === 'in_progress').map(job => {
+            const jobStartTime = getJobStartTime(job);
+            return (
+              <button
               key={job.id || job._id}
               onClick={() => openJobDetails(job)}
               className="w-full text-left bg-yellow-50 rounded-lg p-5 border border-yellow-200 hover:bg-yellow-100 transition-colors"
@@ -3252,7 +3282,7 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                   <div className="text-sm">
                     <span className="text-gray-600">Started:</span>
                     <span className="text-green-700 font-medium ml-2">
-                      {DateUtils.formatDateTime(job.startTime || job.startedAt)}
+                      {DateUtils.formatDateTime(jobStartTime)}
                     </span>
                   </div>
                 </div>
@@ -3261,16 +3291,16 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                   <span className="px-3 py-1 rounded-full text-sm font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">
                     In Progress
                   </span>
-                  {(job.startTime || job.startedAt) && (
+                  {jobStartTime && (
                     <div className="mt-3">
-                      <LiveTimer startTime={job.startTime || job.startedAt} className="text-yellow-700 font-mono text-xl font-bold" />
+                      <LiveTimer startTime={jobStartTime} className="text-yellow-700 font-mono text-xl font-bold" />
                       <p className="text-gray-600 text-xs mt-1">Live Timer</p>
                     </div>
                   )}
                 </div>
               </div>
             </button>
-          ))}
+          )})}
           {filteredJobs.filter(job => job.status === 'In Progress' || job.status === 'in_progress').length === 0 && (
             <p className="text-gray-600 text-center py-8">No jobs in progress</p>
           )}
@@ -3281,8 +3311,10 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
       <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
         <h3 className="text-gray-900 font-semibold text-lg mb-4">Recent Completed Jobs</h3>
         <div className="space-y-4">
-          {filteredJobs.filter(job => job.status === 'Completed' || job.status === 'completed').slice(0, 10).map(job => (
-            <button
+          {filteredJobs.filter(job => job.status === 'Completed' || job.status === 'completed').slice(0, 10).map(job => {
+            const jobStartTime = getJobStartTime(job);
+            return (
+              <button
               key={job.id || job._id}
               onClick={() => openJobDetails(job)}
               className="w-full text-left bg-gray-50 rounded-lg p-5 border border-gray-200 hover:bg-gray-100 transition-colors"
@@ -3340,7 +3372,7 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                     <div>
                       <span className="text-gray-600">Started:</span>
                       <span className="text-green-700 font-medium ml-2">
-                        {DateUtils.formatDateTime(job.startTime || job.startedAt)}
+                        {DateUtils.formatDateTime(jobStartTime)}
                       </span>
                     </div>
                     <div>
@@ -3356,12 +3388,12 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                   <span className="px-3 py-1 rounded-full text-sm font-bold bg-green-50 text-green-700 border border-green-200">
                     Completed
                   </span>
-                  {job.completedAt && (job.startTime || job.startedAt) && (
+                  {job.completedAt && jobStartTime && (
                     <div className="mt-3">
                       <p className="text-green-700 font-bold text-xl">
                         {DateUtils.formatDuration(
                           DateUtils.calculateDuration(
-                            job.startTime || job.startedAt, 
+                            jobStartTime,
                             job.completedAt
                           )
                         )}
@@ -3530,10 +3562,10 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                         </div>
                       )}
                       
-                      {(jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                      {jobDetailsStartTime && (
                         <div className="flex justify-between">
                           <span className="text-gray-600">Started:</span>
-                          <span className="text-green-700">{DateUtils.formatDateTime(jobDetails.job.startTime || jobDetails.job.startedAt)}</span>
+                          <span className="text-green-700">{DateUtils.formatDateTime(jobDetailsStartTime)}</span>
                         </div>
                       )}
                       
@@ -3545,25 +3577,25 @@ function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats 
                       )}
                       
                       {/* Live Timer or Duration */}
-                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') && 
-                       (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') &&
+                       jobDetailsStartTime && (
                         <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-400/20">
                           <p className="text-gray-400 text-sm mb-1">Current Duration:</p>
-                          <LiveTimer 
-                            startTime={jobDetails.job.startTime || jobDetails.job.startedAt} 
-                            className="text-yellow-300 font-mono text-2xl font-bold" 
+                          <LiveTimer
+                            startTime={jobDetailsStartTime}
+                            className="text-yellow-300 font-mono text-2xl font-bold"
                           />
                         </div>
                       )}
-                      
-                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') && 
-                       jobDetails.job?.completedAt && (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+
+                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') &&
+                       jobDetails.job?.completedAt && jobDetailsStartTime && (
                         <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-400/20">
                           <p className="text-gray-400 text-sm mb-1">Total Duration:</p>
                           <p className="text-green-300 font-mono text-2xl font-bold">
                             {DateUtils.formatDuration(
                               DateUtils.calculateDuration(
-                                jobDetails.job.startTime || jobDetails.job.startedAt, 
+                                jobDetailsStartTime,
                                 jobDetails.job.completedAt
                               )
                             )}
@@ -3814,12 +3846,14 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
       <div className="bg-white rounded-xl p-4 md:p-6 border border-gray-200 shadow-sm">
         <h3 className="text-gray-900 font-bold text-lg mb-3">All Jobs</h3>
         <div className="job-list-container space-y-2 max-h-[600px] overflow-y-auto">
-          {filteredJobs.length > 0 ? filteredJobs.map(job => (
-            <div
-              key={job.id || job._id}
-              className="job-card bg-gray-50 rounded-lg p-3 md:p-2.5 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all cursor-pointer hover:shadow-md"
-              onClick={() => openDetails(job)}
-            >
+          {filteredJobs.length > 0 ? filteredJobs.map(job => {
+            const jobStartTime = getJobStartTime(job);
+              return (
+                <div
+                key={job.id || job._id}
+                className="job-card bg-gray-50 rounded-lg p-3 md:p-2.5 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all cursor-pointer hover:shadow-md"
+                onClick={() => openDetails(job)}
+              >
               {/* Main Job Header */}
               <div className="flex justify-between items-start mb-2 gap-2">
                 <div className="flex-1">
@@ -3872,11 +3906,11 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
 
                   {/* Timing Information */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                    {job.startTime || job.startedAt ? (
+                    {jobStartTime ? (
                       <div>
                         <span className="text-gray-600">Started:</span>
                         <span className="text-green-700 font-medium ml-2">
-                          {DateUtils.formatDateTime(job.startTime || job.startedAt)}
+                          {DateUtils.formatDateTime(jobStartTime)}
                         </span>
                       </div>
                     ) : (
@@ -3917,19 +3951,19 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                      job.status || 'Pending'}
                   </div>
                   
-                  {(job.status === 'In Progress' || job.status === 'in_progress') && job.startTime && (
+                  {(job.status === 'In Progress' || job.status === 'in_progress') && jobStartTime && (
                     <div className="mt-2">
-                      <LiveTimer startTime={job.startTime} className="text-yellow-300 font-mono text-xl font-bold" />
+                      <LiveTimer startTime={jobStartTime} className="text-yellow-300 font-mono text-xl font-bold" />
                       <p className="text-gray-400 text-xs mt-1">Live Timer</p>
                     </div>
                   )}
-                  
-                  {(job.status === 'Completed' || job.status === 'completed') && job.completedAt && (job.startTime || job.startedAt) && (
+
+                  {(job.status === 'Completed' || job.status === 'completed') && job.completedAt && jobStartTime && (
                     <div className="mt-2">
                       <p className="text-green-300 font-bold text-xl">
                         {DateUtils.formatDuration(
                           DateUtils.calculateDuration(
-                            job.startTime || job.startedAt, 
+                            jobStartTime,
                             job.completedAt
                           )
                         )}
@@ -4031,10 +4065,10 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                         </div>
                       )}
                       
-                      {(jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                      {jobDetailsStartTime && (
                         <div className="flex justify-between">
                           <span className="text-gray-600">Started:</span>
-                          <span className="text-green-700">{DateUtils.formatTime(jobDetails.job.startTime || jobDetails.job.startedAt)}</span>
+                          <span className="text-green-700">{DateUtils.formatTime(jobDetailsStartTime)}</span>
                         </div>
                       )}
                       
@@ -4046,25 +4080,25 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                       )}
                       
                       {/* Live Timer or Duration */}
-                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') && 
-                       (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') &&
+                       jobDetailsStartTime && (
                         <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-200">
                           <p className="text-gray-600 text-xs mb-0.5">Duration:</p>
-                          <LiveTimer 
-                            startTime={jobDetails.job.startTime || jobDetails.job.startedAt} 
-                            className="text-yellow-700 font-mono text-base font-bold" 
+                          <LiveTimer
+                            startTime={jobDetailsStartTime}
+                            className="text-yellow-700 font-mono text-base font-bold"
                           />
                         </div>
                       )}
-                      
-                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') && 
-                       jobDetails.job?.completedAt && (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
+
+                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') &&
+                       jobDetails.job?.completedAt && jobDetailsStartTime && (
                         <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
                           <p className="text-gray-600 text-xs mb-0.5">Total:</p>
                           <p className="text-green-700 font-mono text-base font-bold">
                             {DateUtils.formatDuration(
                               DateUtils.calculateDuration(
-                                jobDetails.job.startTime || jobDetails.job.startedAt, 
+                                jobDetailsStartTime,
                                 jobDetails.job.completedAt
                               )
                             )}
@@ -4301,7 +4335,7 @@ function UsersView({ users, detailers, onDeleteUser }) {
                 Delete
               </button>
             </div>
-          ))}
+          )})}
         </div>
       </div>
     </div>
@@ -4538,8 +4572,8 @@ function ReportsView({ jobs = [], users = {} }) {
                 </tr>
             </thead>
             <tbody>
-                ${filtered.slice(0, 50).map(job => {
-                    const duration = job.duration ? DateUtils.formatDuration(job.duration) : DateUtils.formatDuration(DateUtils.calculateDuration(job.startTime || job.startedAt, job.completedAt));
+                  ${filtered.slice(0, 50).map(job => {
+                      const duration = job.duration ? DateUtils.formatDuration(job.duration) : DateUtils.formatDuration(DateUtils.calculateDuration(getJobStartTime(job), job.completedAt));
                     return `
                     <tr>
                         <td>${job.date}</td>
@@ -4647,9 +4681,9 @@ function ReportsView({ jobs = [], users = {} }) {
             <div className="md:col-span-2 flex gap-2">
               <button
                 onClick={() => {
-                  const headers = ['Date', 'Technician', 'Service Type', 'Vehicle', 'Status', 'Duration'].join(',');
-                  const rows = filtered.map(job => {
-                    const duration = job.duration || DateUtils.calculateDuration(job.startTime || job.startedAt, job.completedAt);
+                    const headers = ['Date', 'Technician', 'Service Type', 'Vehicle', 'Status', 'Duration'].join(',');
+                    const rows = filtered.map(job => {
+                      const duration = job.duration || DateUtils.calculateDuration(getJobStartTime(job), job.completedAt);
                     return [
                       job.date,
                       job.technicianName || 'Unknown',
@@ -4862,8 +4896,9 @@ function ReportsView({ jobs = [], users = {} }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {drillDownJobs.map((job, idx) => {
-                      const startTime = DateUtils.getValidDate(job.startTime || job.startedAt || job.createdAt || job.timestamp || job.date);
+                      {drillDownJobs.map((job, idx) => {
+                        const preferredStart = getJobStartTime(job) || job.createdAt || job.timestamp || job.date;
+                        const startTime = DateUtils.getValidDate(preferredStart);
                       const endTime = DateUtils.getValidDate(job.completedAt);
                       const duration = startTime && endTime ? 
                         DateUtils.formatDuration(DateUtils.calculateDuration(startTime, endTime)) : 
