@@ -80,6 +80,10 @@ app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: UPLOAD_LIMIT }));
 app.use(bodyParser.urlencoded({ extended: true, limit: UPLOAD_LIMIT }));
 
+// Request logging middleware
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
 // DB Config
 const configDb = require('./config/keys').mongoURI;
 
