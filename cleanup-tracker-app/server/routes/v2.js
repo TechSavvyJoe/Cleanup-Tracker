@@ -6,9 +6,12 @@ const Vehicle = require('../models/Vehicle');
 const axios = require('axios');
 const csv = require('csv-parser');
 const jwt = require('jsonwebtoken');
-
-// Simple key-value Settings in-memory (fallback) with optional Mongo storage
-const settingsStore = new Map();
+const settingsStore = require('../utils/settingsStore');
+const {
+  getInventoryCsvUrl,
+  setInventoryCsvUrl,
+  DEFAULT_INVENTORY_CSV_URL
+} = require('../utils/inventorySource');
 
 const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_EXPIRATION || '15m';
 const REFRESH_TOKEN_TTL = process.env.JWT_REFRESH_EXPIRATION || '7d';
@@ -337,7 +340,7 @@ router.get('/reports', async (req, res) => {
 // Settings minimal API used by client
 router.get('/settings', async (req, res) => {
   const siteTitle = settingsStore.get('siteTitle') || 'Cleanup Tracker';
-  const inventoryCsvUrl = settingsStore.get('inventoryCsvUrl') || process.env.INVENTORY_CSV_URL || '';
+  const inventoryCsvUrl = getInventoryCsvUrl() || DEFAULT_INVENTORY_CSV_URL;
   res.json({ siteTitle, inventoryCsvUrl });
 });
 
@@ -477,7 +480,18 @@ router.get('/diag', async (req, res) => {
 router.put('/settings', async (req, res) => {
   const { key, value } = req.body || {};
   if (!key) return res.status(400).json({ error: 'key required' });
-  settingsStore.set(key, value);
+  try {
+    if (key === 'inventoryCsvUrl') {
+      if (!value) {
+        return res.status(400).json({ error: 'Inventory CSV URL required' });
+      }
+      await setInventoryCsvUrl(value);
+    } else {
+      await settingsStore.set(key, value);
+    }
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
   res.json({ ok: true });
 });
 
@@ -931,6 +945,51 @@ router.get('/vehicles/search', async (req, res) => {
   })));
 });
 
+// Vehicles list (inventory) with optional filters and pagination
+router.get('/vehicles', async (req, res) => {
+  try {
+    const {
+      q = '',
+      status = '',
+      sortBy = 'updatedAt',
+      order = 'desc',
+      page = '1',
+      limit = '100'
+    } = req.query || {};
+
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const perPage = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+    const skip = (pageNum - 1) * perPage;
+
+    const find = {};
+    if (q && String(q).trim()) {
+      const term = String(q).trim();
+      const rx = new RegExp(escapeRegex(term), 'i');
+      const last6 = term.length === 6 ? new RegExp(escapeRegex(term) + '$', 'i') : null;
+      Object.assign(find, last6
+        ? { $or: [{ vin: last6 }, { stockNumber: rx }] }
+        : { $or: [{ vin: rx }, { stockNumber: rx }, { make: rx }, { model: rx }, { vehicle: rx }] }
+      );
+    }
+    if (status && String(status).trim() && String(status).toLowerCase() !== 'all') {
+      find.status = status;
+    }
+
+    const sortDir = String(order).toLowerCase() === 'asc' ? 1 : -1;
+    const sort = { [sortBy]: sortDir };
+
+    const [total, vehicles] = await Promise.all([
+      Vehicle.countDocuments(find),
+      Vehicle.find(find).sort(sort).skip(skip).limit(perPage)
+    ]);
+
+    res.json({ success: true, vehicles, total, page: pageNum, limit: perPage });
+  } catch (e) {
+    console.error('List vehicles failed:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Join by VIN: find latest in-progress job for VIN or create a new one
 router.put('/vehicles/join-by-vin', async (req, res) => {
   const { vin, userId } = req.body || {};
@@ -976,7 +1035,7 @@ router.put('/vehicles/join-by-vin', async (req, res) => {
 // Manually refresh inventory from Google Sheets CSV
 router.post('/vehicles/refresh', async (req, res) => {
   try {
-    const SHEET_URL = process.env.INVENTORY_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv';
+    const SHEET_URL = getInventoryCsvUrl();
     const response = await axios.get(SHEET_URL, { responseType: 'stream' });
     const headerMap = { 0:'newUsed',1:'stockNumber',2:'vehicle',3:'year',4:'make',5:'model',6:'body',7:'drivetrain',8:'color',9:'odometer',10:'price',11:'age',12:'vin',13:'tags',14:'status' };
     const rows = [];
@@ -1002,20 +1061,29 @@ router.post('/vehicles/refresh', async (req, res) => {
     if (!ops.length) return res.status(400).json({ success: false, message: 'No VIN rows found.' });
     const result = await Vehicle.bulkWrite(ops, { ordered: false });
     const total = await Vehicle.countDocuments();
-    res.json({ success: true, upserted: result.upsertedCount || 0, modified: result.modifiedCount || 0, total });
+    res.json({
+      success: true,
+      source: SHEET_URL,
+      upserted: result.upsertedCount || 0,
+      modified: result.modifiedCount || 0,
+      total
+    });
   } catch (e) {
     console.error('Refresh inventory failed:', e);
-    res.status(500).json({ success: false, message: e.message });
+    res.status(500).json({ success: false, message: e.message, source: getInventoryCsvUrl() });
   }
 });
 
 // Allow setting CSV URL via API for future imports
-router.post('/vehicles/set-csv', (req, res) => {
+router.post('/vehicles/set-csv', async (req, res) => {
   const { url } = req.body || {};
   if (!url) return res.status(400).json({ error: 'url required' });
-  settingsStore.set('inventoryCsvUrl', url);
-  process.env.INVENTORY_CSV_URL = url;
-  res.json({ ok: true });
+  try {
+    const normalized = await setInventoryCsvUrl(url);
+    res.json({ ok: true, url: normalized });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 module.exports = router;

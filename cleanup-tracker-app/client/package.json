@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "homepage": ".",
+  "proxy": "http://localhost:5051",
   "dependencies": {
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
@@ -10,8 +11,12 @@
     "axios": "^1.7.7",
     "html5-qrcode": "^2.3.8",
     "http-proxy-middleware": "^3.0.5",
+  "file-saver": "^2.0.5",
+  "jspdf": "^2.5.1",
+  "jspdf-autotable": "^3.8.0",
     "is-empty": "^1.2.0",
     "jwt-decode": "^4.0.0",
+  "xlsx": "^0.18.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-redux": "^9.1.0",
@@ -44,5 +49,10 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.14"
   }
 }

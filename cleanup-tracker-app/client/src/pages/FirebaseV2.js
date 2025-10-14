@@ -1,30 +1,25 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react';
 import VinScanner from '../components/VinScanner';
 import { useToast } from '../components/Toast';
-import axios from 'axios';
+import { V2, v2Request } from '../utils/v2Client';
 
 // 🎨 Modern Design System
 
 // ⚙️ Settings Panel
 import SettingsPanel from '../components/SettingsPanel';
-
-// 📊 Enhanced Reports Component
 import SimpleReports from '../components/SimpleReports';
-
-// 🚀 Premium Enterprise Components - Currently Integrated
-import { 
-  GlassCard, 
-  ProgressRing, 
-  StatCard,
+import {
+  GlassCard,
+  ProgressRing,
+  SkeletonLoader,
+  CommandPalette
 } from '../components/PremiumUI';
-
-// 📊 Advanced Data Visualizations
-import { 
+import {
+  PerformanceChart,
+  DonutChart,
+  Sparkline
 } from '../components/DataVisualization';
-
-// 🤖 AI-Powered Analytics
-import { 
-} from '../utils/advancedAlgorithms';
+import EnterpriseInventory from '../components/EnterpriseInventory';
 
 // Professional error logging and performance monitoring
 const Logger = {
@@ -35,20 +30,19 @@ const Logger = {
       timestamp: new Date().toISOString(),
       context
     });
-    
-    // In production, you would send this to an error tracking service
+
     if (process.env.NODE_ENV === 'production') {
-      // Example: Sentry.captureException(error, { extra: context });
+      // Hook up to external monitoring service if available
     }
   },
-  
+
   warn: (message, context = {}) => {
     console.warn(`[CleanupTracker Warning] ${message}:`, {
       timestamp: new Date().toISOString(),
       context
     });
   },
-  
+
   info: (message, context = {}) => {
     if (process.env.NODE_ENV === 'development') {
       console.info(`[CleanupTracker Info] ${message}:`, {
@@ -57,13 +51,13 @@ const Logger = {
       });
     }
   },
-  
+
   perf: (label, fn) => {
     const start = performance.now();
     try {
       const result = fn();
       const duration = performance.now() - start;
-      if (duration > 100) { // Log slow operations
+      if (duration > 100) {
         Logger.warn(`Slow operation: ${label}`, { duration: `${duration.toFixed(2)}ms` });
       }
       return result;
@@ -74,46 +68,38 @@ const Logger = {
   }
 };
 
-// Security: Input sanitization utilities
+// Security helpers keep user-provided data safe
 const Security = {
   sanitizeInput: (input) => {
     if (typeof input !== 'string') return input;
-    return input
-      .replace(/[<>]/g, '') // Basic XSS prevention
-      .trim()
-      .slice(0, 1000); // Prevent extremely long inputs
+    return input.replace(/[<>]/g, '').trim().slice(0, 1000);
   },
-  
+
   sanitizeHtml: (html) => {
     const div = document.createElement('div');
     div.textContent = html;
     return div.innerHTML;
   },
-  
+
   validateVin: (vin) => {
     if (!vin || typeof vin !== 'string') return false;
-    // VIN validation: 17 characters, alphanumeric except I, O, Q
     return /^[A-HJ-NPR-Z0-9]{17}$/i.test(vin);
   }
 };
 
 // Utility functions for date/time handling with Eastern Time support
 const DateUtils = {
-  // Get current local date in YYYY-MM-DD format (Eastern Time)
   getLocalDateString: (date = new Date()) => {
-    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000))
-      .toISOString().slice(0, 10);
+    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
   },
-  
-  // Check if date is today (Eastern Time)
+
   isToday: (date) => {
     if (!date) return false;
     const inputDate = new Date(date);
     if (isNaN(inputDate.getTime())) return false;
     return DateUtils.getLocalDateString(inputDate) === DateUtils.getLocalDateString();
   },
-  
-  // Check if date is this week (Eastern Time)
+
   isThisWeek: (date) => {
     if (!date) return false;
     const inputDate = new Date(date);
@@ -123,8 +109,7 @@ const DateUtils = {
     const weekEnd = new Date(weekStart.getTime() + (7 * 24 * 60 * 60 * 1000));
     return inputDate >= weekStart && inputDate < weekEnd;
   },
-  
-  // Check if date is this month (Eastern Time)
+
   isThisMonth: (date) => {
     if (!date) return false;
     const inputDate = new Date(date);
@@ -132,30 +117,26 @@ const DateUtils = {
     const now = new Date();
     return inputDate.getMonth() === now.getMonth() && inputDate.getFullYear() === now.getFullYear();
   },
-  
-  // Format date safely
+
   formatDate: (date, options = {}) => {
     if (!date) return 'N/A';
     const d = new Date(date);
     if (isNaN(d.getTime())) return 'Invalid Date';
-    return d.toLocaleString('en-US', { 
+    return d.toLocaleString('en-US', {
       timeZone: 'America/New_York',
-      ...options 
+      ...options
     });
   },
-  
-  // Format duration from minutes to readable format
+
   formatDuration: (minutes) => {
     if (!minutes || minutes < 0) return 'N/A';
-    // Cap unrealistic durations at 24 hours
     const cappedMinutes = Math.min(minutes, 24 * 60);
     const hours = Math.floor(cappedMinutes / 60);
     const mins = Math.round(cappedMinutes % 60);
     if (hours === 0) return `${mins}min`;
     return `${hours}h ${mins}m`;
   },
-  
-  // Calculate duration between two dates in minutes
+
   calculateDuration: (startDate, endDate) => {
     if (!startDate || !endDate) return 0;
     const start = new Date(startDate);
@@ -163,23 +144,20 @@ const DateUtils = {
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
     const diffMs = end.getTime() - start.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
-    // Cap at 24 hours to prevent unrealistic durations
     return Math.max(0, Math.min(diffMins, 24 * 60));
   },
-  
-  // Validate if a date string/object is valid
+
   isValidDate: (date) => {
     if (!date) return false;
     const d = new Date(date);
     return !isNaN(d.getTime());
   },
 
-  // Format date and time for display
   formatDateTime: (date) => {
     if (!date) return 'N/A';
     const d = new Date(date);
     if (isNaN(d.getTime())) return 'Invalid Date';
-    return d.toLocaleString('en-US', { 
+    return d.toLocaleString('en-US', {
       timeZone: 'America/New_York',
       month: 'numeric',
       day: 'numeric',
@@ -189,7 +167,6 @@ const DateUtils = {
     });
   },
 
-  // Get a valid date from various formats
   getValidDate: (date) => {
     if (!date) return null;
     const d = new Date(date);
@@ -197,6 +174,199 @@ const DateUtils = {
   }
 };
 
+function UsersView({ users, onDeleteUser, onRefresh }) {
+  const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer', phoneNumber: '' });
+  const [isAdding, setIsAdding] = useState(false);
+  const [roleFilter, setRoleFilter] = useState('all');
+
+  const allUsers = useMemo(() => (
+    Object.values(users || {}).sort((a, b) => {
+      const roleOrder = { manager: 0, detailer: 1, salesperson: 2 };
+      const roleCompare = (roleOrder[a.role] ?? 3) - (roleOrder[b.role] ?? 3);
+      if (roleCompare !== 0) return roleCompare;
+      return a.name.localeCompare(b.name);
+    })
+  ), [users]);
+
+  const filteredUsers = useMemo(() => (
+    roleFilter === 'all' ? allUsers : allUsers.filter(user => user.role === roleFilter)
+  ), [allUsers, roleFilter]);
+
+  const countsByRole = useMemo(() => (
+    allUsers.reduce((acc, user) => {
+      const roleKey = user.role || 'detailer';
+      acc[roleKey] = (acc[roleKey] || 0) + 1;
+      return acc;
+    }, {})
+  ), [allUsers]);
+
+  const handleAddTeamMember = async (e) => {
+    e.preventDefault();
+    if (!newUser.name.trim()) {
+      return alert('Name is required');
+    }
+    if (!newUser.pin.trim() || newUser.pin.trim().length !== 4) {
+      return alert('PIN must be exactly 4 digits');
+    }
+
+    setIsAdding(true);
+    try {
+      await V2.post('/users', {
+        name: newUser.name.trim(),
+        pin: newUser.pin.trim(),
+        role: newUser.role,
+        phoneNumber: newUser.phoneNumber?.trim() || undefined
+      });
+      alert('Team member added.');
+      setNewUser({ name: '', pin: '', role: 'detailer', phoneNumber: '' });
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } catch (err) {
+      alert('Failed to add user: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const roleLabels = {
+    manager: 'Manager',
+    detailer: 'Detailer',
+    salesperson: 'Salesperson'
+  };
+
+  return (
+    <div className="space-y-6">
+      <section className="bg-black rounded-2xl border border-gray-800 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-white text-lg font-semibold">Team Snapshot</h3>
+            <p className="text-[11px] uppercase tracking-widest text-gray-500">Managers {countsByRole.manager || 0} · Detailers {countsByRole.detailer || 0} · Sales {countsByRole.salesperson || 0}</p>
+          </div>
+          <div className="flex gap-2 bg-gray-950 border border-gray-800 rounded-full p-1">
+            {['all', 'manager', 'detailer', 'salesperson'].map(filter => (
+              <button
+                key={filter}
+                onClick={() => setRoleFilter(filter)}
+                className={`px-3 py-1.5 text-xs rounded-full transition-colors ${roleFilter === filter ? 'bg-white text-black font-semibold' : 'text-gray-400 hover:text-white'}`}
+                type="button"
+              >
+                {filter === 'all' ? 'All' : roleLabels[filter]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <form onSubmit={handleAddTeamMember} className="col-span-1 bg-gray-950/80 border border-gray-900 rounded-2xl p-5 space-y-4">
+            <div>
+              <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Full Name</label>
+              <input
+                type="text"
+                value={newUser.name}
+                onChange={(e) => setNewUser(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full bg-black text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
+                placeholder="Jordan Carver"
+                required
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">4-Digit PIN</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={newUser.pin}
+                  onChange={(e) => setNewUser(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
+                  className="w-full bg-black text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="1701"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Role</label>
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser(prev => ({ ...prev, role: e.target.value }))}
+                  className="w-full bg-black text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="detailer">Detailer</option>
+                  <option value="salesperson">Salesperson</option>
+                  <option value="manager">Manager</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Phone Number</label>
+              <input
+                type="tel"
+                value={newUser.phoneNumber}
+                onChange={(e) => setNewUser(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                className="w-full bg-black text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
+                placeholder="555-123-4567"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isAdding}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-white text-black font-semibold py-2.5 transition-colors disabled:opacity-50"
+            >
+              {isAdding ? 'Adding…' : 'Add Team Member'}
+            </button>
+          </form>
+
+          <div className="col-span-1 xl:col-span-2 space-y-4">
+            {filteredUsers.length === 0 ? (
+              <div className="border border-dashed border-gray-800 rounded-2xl p-10 text-center text-gray-500">
+                No team members in this view yet.
+              </div>
+            ) : (
+              filteredUsers.map(user => (
+                <div key={user.id} className="bg-gray-950/80 border border-gray-900 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h4 className="text-white text-base font-semibold">{user.name}</h4>
+                      <span className="px-3 py-1 text-[11px] uppercase tracking-wide rounded-full bg-white/10 text-white">{roleLabels[user.role] || 'Team'}</span>
+                      {user.isActive === false && (
+                        <span className="px-2 py-1 text-[10px] uppercase tracking-widest rounded-full bg-red-500/10 text-red-400 border border-red-500/40">Inactive</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-400">
+                      <span className="font-mono text-xs">PIN {user.pin || '----'}</span>
+                      {user.employeeNumber && <span>Employee #{user.employeeNumber}</span>}
+                      {user.phoneNumber && (
+                        <button
+                          type="button"
+                          className="underline decoration-dotted hover:text-white"
+                          onClick={() => {
+                            const smsMessage = `Hi ${user.name}, you have a new job assignment. Please check CleanUP Tracker for details.`;
+                            window.open(`sms:${user.phoneNumber}?body=${encodeURIComponent(smsMessage)}`, '_blank');
+                          }}
+                        >
+                          SMS {user.phoneNumber}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => onDeleteUser(user.id)}
+                      className="inline-flex items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 text-red-300 px-4 py-2 text-sm font-semibold hover:text-red-100"
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 // Enhanced Live Timer Component with error handling
 function LiveTimer({ startTime, className = "text-lg font-mono" }) {
   const [elapsed, setElapsed] = useState(0);
@@ -238,12 +408,6 @@ function LiveTimer({ startTime, className = "text-lg font-mono" }) {
   
   return <span className={className}>{formatTime(elapsed)}</span>;
 }
-
-// Create API instance with proper base URL
-const V2 = axios.create({
-  baseURL: '/api/v2',
-  timeout: 10000,
-});
 
 const TOKEN_STORAGE_KEY = 'cleanupTracker.session';
 const UNAUTHORIZED_EVENT = 'cleanup-tracker:unauthorized';
@@ -366,10 +530,11 @@ V2.interceptors.response.use(
   }
 );
 
-// Login Component with gradient/glass theme
+// 🎨 BILLION DOLLAR TECH COMPANY LOGIN - ULTRA PREMIUM DESIGN
 function LoginForm({ onLogin }) {
   const [employeeId, setEmployeeId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const [siteTitle, setSiteTitle] = useState('Cleanup Tracker');
 
   // Load settings for site title
@@ -385,34 +550,43 @@ function LoginForm({ onLogin }) {
     })();
   }, []);
 
-  const handleSubmit = useCallback(async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+  const handleSubmit = useCallback(async (pinToSubmit) => {
+    const pin = pinToSubmit || employeeId;
+    setError('');
 
-    if (!employeeId) {
-      alert('Enter your PIN');
+    if (!pin) {
+      setError('Please enter your PIN');
       return;
     }
 
-    if (!/^[0-9]{4,8}$/.test(employeeId)) {
-      alert('PIN must be 4 digits');
+    if (!/^[0-9]{4}$/.test(pin)) {
+      setError('PIN must be 4 digits');
       return;
     }
 
     setIsLoading(true);
     try {
-      const response = await V2.post('/auth/login', { employeeId, pin: employeeId });
+      const response = await v2Request('post', '/auth/login', { 
+        employeeId: pin, 
+        pin: pin 
+      }, {
+        timeout: 10000 // 10 second timeout to prevent 504
+      });
       const session = response.data;
       
       if (session?.user && session?.tokens?.accessToken) {
         console.log('✅ Login successful for:', session.user.name);
         onLogin(session);
         setEmployeeId('');
+        setError('');
       } else {
-        alert('Invalid login response from server');
+        setError('Invalid login response from server');
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || err.message || 'Login failed';
-      alert(errorMsg);
+      console.error('Login error:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Login failed. Please try again.';
+      setError(errorMsg);
+      setEmployeeId(''); // Clear on error so user can try again
     } finally {
       setIsLoading(false);
     }
@@ -427,15 +601,18 @@ function LoginForm({ onLogin }) {
       if (e.key >= '0' && e.key <= '9') {
         if (employeeId.length < 4) {
           setEmployeeId(prev => prev + e.key);
+          setError(''); // Clear error on input
         }
       }
       // Backspace or Delete
       else if (e.key === 'Backspace' || e.key === 'Delete') {
         setEmployeeId(prev => prev.slice(0, -1));
+        setError('');
       }
       // Escape to clear
       else if (e.key === 'Escape') {
         setEmployeeId('');
+        setError('');
       }
       // Enter to submit
       else if (e.key === 'Enter' && employeeId.length === 4) {
@@ -448,213 +625,358 @@ function LoginForm({ onLogin }) {
   }, [employeeId, isLoading, handleSubmit]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-gray-50 to-indigo-50 p-4">
-      {/* Responsive Login Container - Vertical on Mobile, Horizontal on Desktop */}
-      <div className="w-full max-w-7xl">
-        <div className="flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12">
-          
-          {/* Left Side: Branding (Hidden on mobile, shown on desktop) */}
-          <div className="hidden lg:block flex-1 max-w-md">
-            <div className="text-left space-y-6">
-              <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl">
-                <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-5xl font-bold text-gray-900 mb-4">{siteTitle}</h1>
-                <p className="text-xl text-gray-600 font-medium mb-6">Mission Ford of Dearborn</p>
-                <p className="text-gray-500 text-lg leading-relaxed">
-                  Professional vehicle detailing management system for detailers, sales team, and management.
-                </p>
-              </div>
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span>Real-time Tracking</span>
+    <div className="min-h-screen relative overflow-hidden bg-black">
+      {/* Mobile-Optimized Main Content - Single Screen, No Scroll */}
+      <div className="relative z-10 h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center justify-center">
+            
+            {/* Minimal Header - X.com Style */}
+            <div className="hidden lg:block flex-1 max-w-lg">
+              <div className="text-left space-y-6 animate-fade-in">
+                {/* Professional Logo & Icon */}
+                <div className="flex items-center gap-5">
+                  <div className="relative">
+                    <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-2xl border border-white/10">
+                      <span className="text-2xl font-black text-white tracking-wide">CT</span>
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full animate-pulse shadow-sm"></div>
+                  </div>
+                  <div>
+                    <h1 className="text-4xl font-black text-white mb-1 bg-gradient-to-r from-gray-100 to-slate-200 bg-clip-text text-transparent">{siteTitle}</h1>
+                    <p className="text-lg text-slate-300 dark:text-slate-400 font-medium">Precision Cleanup Intelligence</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span>Secure Access</span>
+
+                {/* Features */}
+                <div className="space-y-6">
+                  <p className="text-xl text-gray-300 leading-relaxed">
+                    Next-generation vehicle detailing management platform built for modern dealerships.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-center gap-3 p-3 bg-white/8 dark:bg-white/5 backdrop-blur-lg rounded-lg border border-slate-400/20 dark:border-slate-600/20 hover:bg-white/12 dark:hover:bg-white/8 transition-all duration-300">
+                      <div className="w-3 h-3 bg-blue-400 rounded-full animate-pulse"></div>
+                      <span className="text-white font-medium text-sm">Real-time Sync</span>
+                    </div>
+                    <div className="flex items-center gap-3 p-3 bg-white/8 dark:bg-white/5 backdrop-blur-lg rounded-lg border border-slate-400/20 dark:border-slate-600/20 hover:bg-white/12 dark:hover:bg-white/8 transition-all duration-300">
+                      <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
+                      <span className="text-white font-medium text-sm">Secure Access</span>
+                    </div>
+                    <div className="flex items-center gap-3 p-3 bg-white/8 dark:bg-white/5 backdrop-blur-lg rounded-lg border border-slate-400/20 dark:border-slate-600/20 hover:bg-white/12 dark:hover:bg-white/8 transition-all duration-300">
+                      <div className="w-3 h-3 bg-cyan-400 rounded-full animate-pulse"></div>
+                      <span className="text-white font-medium text-sm">Smart Analytics</span>
+                    </div>
+                    <div className="flex items-center gap-3 p-3 bg-white/8 dark:bg-white/5 backdrop-blur-lg rounded-lg border border-slate-400/20 dark:border-slate-600/20 hover:bg-white/12 dark:hover:bg-white/8 transition-all duration-300">
+                      <div className="w-3 h-3 bg-slate-400 rounded-full animate-pulse"></div>
+                      <span className="text-white font-medium text-sm">Mobile Ready</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Professional Trust Indicators */}
+                <div className="flex items-center gap-4 pt-4 border-t border-slate-400/20 dark:border-slate-600/20">
+                  <div className="flex items-center gap-2 text-slate-300 dark:text-slate-400">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.414-4.414a2 2 0 00-2.828 0L12 10.172L5.414 3.586a2 2 0 00-2.828 2.828l7 7a2 2 0 002.828 0l11-11a2 2 0 00-2.828-2.828z" />
+                    </svg>
+                    <span className="text-sm">Enterprise Security</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-300 dark:text-slate-400">
+                    <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-sm">24/7 Uptime</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Right Side: Login Card */}
-          <div className="w-full lg:flex-1 max-w-md">
-            <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 p-8 md:p-10 transform transition-all duration-300 hover:shadow-3xl">
-              
-              {/* Mobile-only branding (shown on mobile, hidden on desktop) */}
-              <div className="text-center mb-8 lg:hidden">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
-                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-1">{siteTitle}</h2>
-                <p className="text-sm text-gray-600 font-medium">Mission Ford of Dearborn</p>
-              </div>
-
-              {/* Desktop-only header */}
-              <div className="hidden lg:block text-center mb-8">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-                <p className="text-gray-600">Enter your 4-digit PIN to continue</p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="relative">
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">Employee PIN</label>
+            {/* X.com Style Login - Single Screen */}
+            <div className="w-full max-w-md">
+              <div className="relative">
+                {/* Main Card - Pure Black X.com Style */}
+                <div className="relative bg-black p-6 animate-scale-in">
                   
-                  {/* PIN Display */}
-                  <div className="w-full bg-gradient-to-br from-gray-50 to-gray-100 border-2 border-gray-200 rounded-2xl py-5 px-6 mb-6 shadow-inner">
-                    <div className="text-center">
-                      <div className="text-4xl font-mono text-gray-900 tracking-[0.5em] min-h-[48px] flex items-center justify-center">
-                        {employeeId.replace(/./g, '●') || <span className="text-gray-400 text-xl tracking-normal">Enter PIN</span>}
+                  {/* Site Title at Top - X.com Style */}
+                  <div className="text-center mb-10">
+                    {/* Logo Icon */}
+                    <div className="flex justify-center mb-4">
+                      <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-lg border border-white/10">
+                        <span className="text-2xl font-black text-white tracking-wide">CT</span>
                       </div>
                     </div>
-                  </div>
-                  
-                  {/* Number Pad - Classic Calculator Style (3x4 Grid) */}
-                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem'}} className="max-w-sm mx-auto">
-                    {/* Row 1: 1, 2, 3 */}
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '1'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '2'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '3'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      3
-                    </button>
-
-                    {/* Row 2: 4, 5, 6 */}
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '4'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      4
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '5'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      5
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '6'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      6
-                    </button>
-
-                    {/* Row 3: 7, 8, 9 */}
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '7'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      7
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '8'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      8
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '9'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      9
-                    </button>
-
-                    {/* Row 4: Clear, 0, Backspace */}
-                    <button
-                      type="button"
-                      onClick={() => setEmployeeId('')}
-                      className="bg-red-50 hover:bg-red-100 border-2 border-red-200 hover:border-red-400 rounded-xl py-4 px-6 text-base font-bold text-red-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { if (employeeId.length < 4) setEmployeeId(employeeId + '0'); }}
-                      className="bg-white hover:bg-blue-50 border-2 border-gray-200 hover:border-blue-400 rounded-xl py-4 px-6 text-2xl font-bold text-gray-900 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEmployeeId(employeeId.slice(0, -1))}
-                      className="bg-yellow-50 hover:bg-yellow-100 border-2 border-yellow-200 hover:border-yellow-400 rounded-xl py-4 px-6 text-xl font-bold text-yellow-700 transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      ⌫
-                    </button>
+                    
+                    {/* Site Title */}
+                    <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
+                      {siteTitle}
+                    </h1>
+                    <p className="text-gray-600 font-normal text-base">Enter your 4-digit PIN</p>
                   </div>
 
-                  {/* Keyboard hint for desktop */}
-                  <p className="hidden md:block text-xs text-gray-500 text-center mt-4">
-                    💡 Tip: You can also use your keyboard to enter the PIN
-                  </p>
-                </div>
+                  <form onSubmit={handleSubmit} className="space-y-6">
+                    {/* Error Message */}
+                    {error && (
+                      <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 animate-fade-in">
+                        <div className="flex items-center gap-2">
+                          <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className="text-red-400 font-medium text-sm">{error}</p>
+                        </div>
+                      </div>
+                    )}
 
-                <button
-                  type="submit"
-                  disabled={isLoading || employeeId.length !== 4}
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg"
-                >
-                  {isLoading ? (
-                    <div className="flex items-center justify-center">
-                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Signing In...
+                    <div className="relative">
+                      {/* Large PIN Display - X.com Style */}
+                      <div className="relative mb-8">
+                        <div className="relative bg-black border border-gray-800 rounded-2xl py-8 px-6">
+                          <div className="text-center">
+                            <div className="flex items-center justify-center gap-4 min-h-[80px]">
+                              {[0, 1, 2, 3].map((index) => (
+                                <div
+                                  key={index}
+                                  className={`relative w-16 h-16 rounded-2xl border-2 flex items-center justify-center text-3xl font-bold transition-all duration-300 ${
+                                    employeeId[index] 
+                                      ? 'bg-gray-900 border-gray-700 text-white shadow-xl' 
+                                      : 'bg-black border-gray-800 text-gray-700'
+                                  }`}
+                                >
+                                  {employeeId[index] ? (
+                                    <div className="relative">
+                                      <div className="w-4 h-4 bg-black rounded-full"></div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-2xl font-bold text-gray-800">{index + 1}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Compact Professional Dial Pad */}
+                      <div className="space-y-2 max-w-xs mx-auto mb-4">
+                        {/* Row 1: 1, 2, 3 */}
+                        <div className="flex justify-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '1';
+                                setEmployeeId(newPin);
+                                setError('');
+                                // Auto-submit when 4 digits entered
+                                if (newPin.length === 4) {
+                                  setTimeout(() => handleSubmit(newPin), 300);
+                                }
+                              }
+                            }}
+                            className="relative group h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl text-3xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">1</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '2';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) {
+                                  setTimeout(() => handleSubmit(newPin), 300);
+                                }
+                              }
+                            }}
+                            className="relative group h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl text-3xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">2</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '3';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) {
+                                  setTimeout(() => handleSubmit(newPin), 300);
+                                }
+                              }
+                            }}
+                            className="relative group h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl text-3xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">3</span>
+                          </button>
+                        </div>
+                        
+                        {/* Row 2: 4, 5, 6 */}
+                        <div className="flex justify-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '4';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">4</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '5';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">5</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '6';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">6</span>
+                          </button>
+                        </div>
+                        
+                        {/* Row 3: 7, 8, 9 */}
+                        <div className="flex justify-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '7';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">7</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '8';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">8</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '9';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">9</span>
+                          </button>
+                        </div>
+                        
+                        {/* Row 4: Clear, 0, Delete */}
+                        <div className="flex justify-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmployeeId('');
+                              setError('');
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 border-2 border-red-500 hover:border-red-400 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                            title="Clear All"
+                          >
+                            <span className="text-4xl">✕</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (employeeId.length < 4) {
+                                const newPin = employeeId + '0';
+                                setEmployeeId(newPin);
+                                setError('');
+                                if (newPin.length === 4) setTimeout(() => handleSubmit(newPin), 300);
+                              }
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-700 hover:to-gray-800 border-2 border-gray-700 hover:border-gray-600 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                          >
+                            <span className="text-4xl">0</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmployeeId(employeeId.slice(0, -1));
+                              setError('');
+                            }}
+                            className="h-20 w-20 bg-gradient-to-br from-orange-600 to-orange-700 hover:from-orange-500 hover:to-orange-600 border-2 border-orange-500 hover:border-orange-400 rounded-2xl font-bold text-white transition-all duration-200 shadow-xl hover:shadow-2xl active:scale-95 flex items-center justify-center"
+                            title="Delete Last"
+                          >
+                            <span className="text-4xl">⌫</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Keyboard Hint */}
+                      <div className="text-center mb-4">
+                        <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center justify-center gap-2 font-medium">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                          </svg>
+                          <span>Use keyboard or touch for PIN entry</span>
+                        </p>
+                      </div>
                     </div>
-                  ) : (
-                    <span className="flex items-center justify-center gap-2">
-                      <span>Sign In</span>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                      </svg>
-                    </span>
-                  )}
-                </button>
-                
-                <div className="text-center mt-6">
-                  <div className="flex items-center justify-center gap-4 text-xs text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                      Secure Login
-                    </span>
-                    <span>•</span>
-                    <span>Detailers • Sales • Management</span>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
 
+                    {/* Auto-Login Status */}
+                    <div className="w-full py-4">
+                      {isLoading ? (
+                        <div className="flex items-center justify-center gap-3 py-4">
+                          <svg className="animate-spin h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span className="text-xl font-semibold text-white">Signing In...</span>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-600 text-center font-medium">
+                          Auto-login enabled
+                        </p>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+          </div>
         </div>
       </div>
     </div>
@@ -662,7 +984,7 @@ function LoginForm({ onLogin }) {
 }
 
 // Main App Component with Mobile-First Design
-function MainApp({ user, onLogout, onError }) {
+function MainApp({ user, onLogout, onError, showCommandPalette, setShowCommandPalette }) {
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [users, setUsers] = useState({});
@@ -673,19 +995,99 @@ function MainApp({ user, onLogout, onError }) {
   const [isSearching, setIsSearching] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [settings, setSettings] = useState({ siteTitle: 'Cleanup Tracker' });
+  const [settings, setSettings] = useState({
+    siteTitle: 'CleanUP Tracker',
+    inventoryCsvUrl: '',
+    serviceExpectations: {}
+  });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [componentError, setComponentError] = useState(null);
+  // Sidebar visibility: default hidden on mobile, shown on large screens
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth >= 1024;
+  });
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => setIsSidebarOpen(prev => !prev), []);
   
-  // 🎨 Modern Theme State - Always Dark Mode
-  const [theme, setTheme] = useState('dark');
+  // 🎨 Force Dark Mode - X.com/Twitter Styling
+  const [theme] = useState('dark'); // Locked to dark mode
   const [showSettings, setShowSettings] = useState(false);
-  
-  // Apply theme to document
+  const siteTitle = useMemo(() => (
+    settings?.siteTitle && settings.siteTitle.trim() ? settings.siteTitle.trim() : 'Cleanup Tracker'
+  ), [settings?.siteTitle]);
+  const corporateMark = useMemo(() => {
+    const words = siteTitle.split(' ').filter(Boolean);
+    if (words.length === 0) {
+      return { lead: 'Cleanup', tail: 'Tracker' };
+    }
+    if (words.length === 1) {
+      return { lead: words[0], tail: '' };
+    }
+    return {
+      lead: words[0],
+      tail: words.slice(1).join(' ')
+    };
+  }, [siteTitle]);
+  const viewTitle = useMemo(() => {
+    const mapping = {
+      dashboard: 'Dashboard',
+      jobs: (user.role === 'detailer' || user.role === 'technician') ? 'New Job' : 'Job Management',
+      qc: 'Quality Control',
+      reports: 'Analytics',
+      users: 'Team',
+      settings: 'System Settings',
+      me: 'Profile'
+    };
+    const label = mapping[view];
+    if (label) return label;
+    if (view) return view.charAt(0).toUpperCase() + view.slice(1);
+    return 'Overview';
+  }, [view, user.role]);
+  const previousViewRef = useRef(view);
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('app-theme', theme);
-  }, [theme]);
+    if (previousViewRef.current !== view) {
+      previousViewRef.current = view;
+      closeSidebar();
+    }
+  }, [view, closeSidebar]);
+  const sidebarDisplayClass = useMemo(() => (
+    isSidebarOpen
+      ? 'translate-x-0 opacity-100 pointer-events-auto'
+      : '-translate-x-full opacity-0 pointer-events-none'
+  ), [isSidebarOpen]);
+  
+  // Apply dark theme permanently
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.documentElement.classList.add('dark');
+    localStorage.setItem('app-theme', 'dark');
+    // Apply X.com black background
+    document.body.className = 'dark bg-black';
+    document.body.style.backgroundColor = '#000000';
+  }, []);
+
+  // Adjust sidebar visibility when resizing to mobile widths
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        closeSidebar();
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [closeSidebar]);
+
+  // Close sidebar with Escape key
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') closeSidebar();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSidebarOpen, closeSidebar]);
 
   // Enhanced toast toast system
   const toast = useToast();
@@ -745,19 +1147,24 @@ function MainApp({ user, onLogout, onError }) {
         }
       };
 
-      const [jobsRes, usersRes, settingsRes] = await Promise.all([
+      const [jobsRes, usersRes, settingsRes, serviceExpectationsRes] = await Promise.all([
         fetchWithRetry('/jobs'),
         fetchWithRetry('/users'),
         fetchWithRetry('/settings').catch(() => {
           Logger.warn('Settings endpoint failed, using defaults');
-          return { data: { siteTitle: 'Cleanup Tracker' } };
+          return { data: { siteTitle: 'CleanUP Tracker' } };
+        }),
+        fetchWithRetry('/service-expectations').catch(() => {
+          Logger.warn('Service expectations endpoint failed, using defaults');
+          return { data: {} };
         })
       ]);
       
       // Data validation and sanitization
       const jobs = Array.isArray(jobsRes.data) ? jobsRes.data : [];
       const usersArray = Array.isArray(usersRes.data) ? usersRes.data : [];
-      const settings = settingsRes.data || { siteTitle: 'Cleanup Tracker' };
+  const settings = settingsRes.data || { siteTitle: 'CleanUP Tracker' };
+  const rawServiceExpectations = settings.serviceExpectations || serviceExpectationsRes.data || {};
 
       // Performance optimization: batch state updates
       setJobs(jobs);
@@ -779,15 +1186,22 @@ function MainApp({ user, onLogout, onError }) {
       // Sanitize settings
       const sanitizedSettings = {
         ...settings,
-        siteTitle: Security.sanitizeInput(settings.siteTitle || 'Cleanup Tracker'),
-        theme: settings.theme || 'light'
+  siteTitle: Security.sanitizeInput(settings.siteTitle || 'CleanUP Tracker'),
+        theme: settings.theme || 'light',
+        inventoryCsvUrl: settings.inventoryCsvUrl ? Security.sanitizeInput(settings.inventoryCsvUrl) : '',
+        serviceExpectations: Object.entries(rawServiceExpectations).reduce((acc, [key, value]) => {
+          const safeKey = Security.sanitizeInput(key);
+          if (!safeKey) return acc;
+          acc[safeKey] = {
+            duration: Number(value?.duration) || 0,
+            description: Security.sanitizeInput(value?.description || '')
+          };
+          return acc;
+        }, {})
       };
       setSettings(sanitizedSettings);
 
-      // Sync theme with local state if different
-      if (sanitizedSettings.theme && sanitizedSettings.theme !== theme) {
-        setTheme(sanitizedSettings.theme);
-      }
+      // Theme is locked to dark mode - ignore saved theme preferences
       
       setError(null);
       
@@ -896,19 +1310,23 @@ function MainApp({ user, onLogout, onError }) {
           case '1':
             event.preventDefault();
             setView('dashboard');
+            closeSidebar();
             break;
           case '2':
             event.preventDefault();
             if (user.role !== 'detailer') setView('jobs');
             else setView('jobs');
+            closeSidebar();
             break;
           case '3':
             event.preventDefault();
             if (user.role === 'manager') setView('users');
+            closeSidebar();
             break;
           case '4':
             event.preventDefault();
             if (user.role === 'manager') setView('reports');
+            closeSidebar();
             break;
           default:
             break;
@@ -919,7 +1337,7 @@ function MainApp({ user, onLogout, onError }) {
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user.role]); // Removed loadInitialData and toast to prevent loops
+  }, [user.role, closeSidebar]); // Removed loadInitialData and toast to prevent loops
 
     // One-time inventory warm-up: if first search returns empty and not yet warmed, trigger refresh
     useEffect(() => {
@@ -1133,6 +1551,7 @@ function MainApp({ user, onLogout, onError }) {
           await loadInitialData();
           setSearchTerm(vin);
           setView('dashboard');
+          closeSidebar();
           toast.success('Successfully joined existing job!');
           
         } catch (joinError) {
@@ -1149,6 +1568,7 @@ function MainApp({ user, onLogout, onError }) {
             setSearchTerm(vin);
             setHasSearched(true);
             setView('jobs');
+            closeSidebar();
             
             if (results.length === 0) {
               toast.warning('No vehicles found with this VIN. Please verify and try again.');
@@ -1199,26 +1619,30 @@ function MainApp({ user, onLogout, onError }) {
 
   // Delete user handler
   const deleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this detailer?')) return;
+    if (!window.confirm('Remove this team member? Their access will be revoked.')) return;
     
     try {
       await V2.delete(`/users/${userId}`);
       await loadInitialData(); // Reload data
-      alert('Detailer deleted successfully');
+      alert('Team member removed.');
     } catch (err) {
-      alert('Failed to delete detailer: ' + (err.response?.data?.error || err.message));
+      alert('Failed to remove team member: ' + (err.response?.data?.error || err.message));
     }
   };
 
   // Enhanced computed values with performance optimizations
+  // Treat QC returns and pause states as active so detailers can resume work without hunting for jobs in other lists
+  const ACTIVE_JOB_STATUSES = useMemo(() => new Set(['In Progress', 'QC Required', 'Paused']), []);
+  const COMPLETED_JOB_STATUSES = useMemo(() => new Set(['Completed', 'QC Approved']), []);
+
   const activeJobs = useMemo(() => 
-    jobs.filter(j => j.status === 'In Progress'), 
-    [jobs]
+    jobs.filter(j => ACTIVE_JOB_STATUSES.has(j.status)), 
+    [jobs, ACTIVE_JOB_STATUSES]
   );
   
   const completedJobs = useMemo(() => 
-    jobs.filter(j => j.status === 'Completed' || j.status === 'QC Required'), 
-    [jobs]
+    jobs.filter(j => COMPLETED_JOB_STATUSES.has(j.status)), 
+    [jobs, COMPLETED_JOB_STATUSES]
   );
   
   const userActiveJob = useMemo(() => 
@@ -1267,23 +1691,92 @@ function MainApp({ user, onLogout, onError }) {
       qcRequired: jobs.filter(job => job.status === 'QC Required').length
     };
   }, [activeJobs, completedJobs, jobs]);
-  const detailers = useMemo(() => 
-    Object.values(users).filter(u => u.role === 'detailer'), 
-    [users]
-  );
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-900 text-xl">Loading...</div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex">
+        {/* Enterprise Loading State */}
+        <div className="w-72 bg-black shadow-2xl border-r border-gray-800">
+          {/* Sidebar Skeleton */}
+          <div className="p-6 border-b border-gray-800">
+            <SkeletonLoader className="h-12 w-12 rounded-2xl mb-3" />
+            <SkeletonLoader className="h-6 w-32 mb-2" />
+            <SkeletonLoader className="h-4 w-24" />
+          </div>
+          <div className="p-5 space-y-3">
+            {[1,2,3,4,5].map(i => (
+              <div key={i} className="flex items-center gap-3">
+                <SkeletonLoader className="h-10 w-10 rounded-xl" />
+                <div className="flex-1">
+                  <SkeletonLoader className="h-4 w-24 mb-1" />
+                  <SkeletonLoader className="h-3 w-16" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* Main Content Skeleton */}
+        <div className="flex-1 p-8">
+          <div className="space-y-6">
+            <div className="flex items-center gap-4">
+              <SkeletonLoader className="h-16 w-16 rounded-3xl" />
+              <div>
+                <SkeletonLoader className="h-8 w-48 mb-2" />
+                <SkeletonLoader className="h-5 w-32" />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[1,2].map(i => (
+                <div key={i} className="bg-black rounded-3xl p-8 shadow-2xl">
+                  <div className="flex items-center gap-4 mb-4">
+                    <SkeletonLoader className="h-14 w-14 rounded-2xl" />
+                    <div>
+                      <SkeletonLoader className="h-4 w-24 mb-2" />
+                      <SkeletonLoader className="h-8 w-16" />
+                    </div>
+                  </div>
+                  <SkeletonLoader className="h-20 w-full rounded-2xl" />
+                </div>
+              ))}
+            </div>
+            
+            <div className="bg-black rounded-3xl p-8 shadow-2xl">
+              <SkeletonLoader className="h-6 w-48 mb-6" />
+              <div className="space-y-4">
+                {[1,2,3].map(i => (
+                  <div key={i} className="flex items-center gap-4 p-4 rounded-2xl bg-gray-50">
+                    <SkeletonLoader className="h-12 w-12 rounded-xl" />
+                    <div className="flex-1">
+                      <SkeletonLoader className="h-5 w-64 mb-2" />
+                      <SkeletonLoader className="h-4 w-48" />
+                    </div>
+                    <SkeletonLoader className="h-8 w-20 rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          {/* Loading Animation Overlay */}
+          <div className="fixed bottom-8 right-8">
+            <div className="bg-black rounded-2xl p-4 shadow-2xl border border-gray-800 flex items-center gap-3">
+              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <div>
+                <p className="font-semibold text-white">Loading Dashboard</p>
+                <p className="text-sm text-gray-600">Preparing your workspace...</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-6 border border-red-200 shadow-lg max-w-md">
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="bg-black rounded-xl p-6 border border-red-200 shadow-lg max-w-md">
           <h2 className="text-red-800 font-semibold text-lg mb-2">Error</h2>
           <p className="text-red-700 mb-4">{error}</p>
           <button 
@@ -1300,14 +1793,14 @@ function MainApp({ user, onLogout, onError }) {
   // Error boundary wrapper
   if (componentError) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-8 shadow-lg max-w-md w-full text-center">
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="bg-black rounded-xl p-8 shadow-lg max-w-md w-full text-center">
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Oops! Something went wrong</h3>
+          <h3 className="text-lg font-semibold text-white mb-2">Oops! Something went wrong</h3>
           <p className="text-gray-600 mb-4">{componentError}</p>
           <button 
             onClick={() => {
@@ -1324,15 +1817,10 @@ function MainApp({ user, onLogout, onError }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{
-      background: theme === 'dark' ? '#0F172A' : '#F9FAFB',
-      color: theme === 'dark' ? '#F1F5F9' : '#111827',
-      minHeight: '100vh',
-      transition: 'background-color 0.3s ease, color 0.3s ease',
-    }}>
+    <>
       {/* Network Status Indicator */}
       {!isOnline && (
-        <div className="bg-red-600 text-white px-4 py-2 text-center text-sm font-medium">
+        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white px-4 py-2 text-center text-sm font-medium z-50">
           <svg className="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 5.636L5.636 18.364M12 2.05v19.9M2.05 12h19.9" />
           </svg>
@@ -1340,281 +1828,492 @@ function MainApp({ user, onLogout, onError }) {
         </div>
       )}
 
-      {/* Modern Header with Theme Toggle */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 shadow-sm select-none" style={{
-        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
-        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
-      }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="font-bold text-lg" style={{
-              color: theme === 'dark' ? '#F1F5F9' : '#111827',
-            }}>
-              {settings.siteTitle || 'Cleanup Tracker'}
-            </h1>
-            <p className="text-sm" style={{
-              color: theme === 'dark' ? '#CBD5E1' : '#4B5563',
-            }}>
-              {user.name} • {
-                user.role === 'manager' ? 'Manager' :
-                user.role === 'admin' ? 'Admin' :
-                user.role === 'salesperson' ? 'Sales' :
-                user.role === 'technician' ? 'Technician' :
-                'Detailer'
-              }
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Settings Button */}
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-2 rounded-lg transition-all"
-              style={{
-                background: theme === 'dark' ? '#334155' : '#F3F4F6',
-                color: theme === 'dark' ? '#F1F5F9' : '#111827',
-              }}
-              title="Settings"
-            >
-              ⚙️
-            </button>
-            <button 
-              onClick={onLogout}
-              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors border"
-              style={{
-                background: theme === 'dark' ? '#7F1D1D' : '#FEF2F2',
-                color: theme === 'dark' ? '#FEE2E2' : '#B91C1C',
-                borderColor: theme === 'dark' ? '#991B1B' : '#FEE2E2',
-              }}
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      {/* Settings Panel */}
-      <SettingsPanel
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        currentTheme={theme}
-        onThemeChange={setTheme}
-        userRole={user.role}
+      {/* X.com-Style Overlay - clicks close sidebar */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={closeSidebar}
       />
 
-      {/* Modern Navigation */}
-      <div className="border-b px-6 py-4 shadow-sm" style={{
-        background: theme === 'dark' ? '#1E293B' : '#FFFFFF',
-        borderColor: theme === 'dark' ? '#334155' : '#E5E7EB',
-      }}>
-        <div className="flex space-x-2 overflow-x-auto">
+      {/* Sidebar - X.com style, slides in from left */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-black border-r border-gray-800 flex flex-col transform transition-all duration-200 ease-out will-change-transform ${sidebarDisplayClass}`}
+      >
+        {/* Logo & Brand - X.com compact header */}
+        <div className="p-4 border-b border-gray-800 bg-black flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-11 h-11 rounded-2xl ring-1 ring-white/10 shadow-lg shadow-blue-500/30 bg-black">
+              <img src="/brand.svg" alt="Cleanup Tracker" className="w-11 h-11 rounded-2xl hidden sm:block" onError={(e)=>{e.currentTarget.style.display='none';}}/>
+              <div className="sm:hidden flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500">
+                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7.5c-1.2-2.1-3.4-3.5-6-3.5-3.9 0-7 3.1-7 7s3.1 7 7 7c2.6 0 4.8-1.4 6-3.5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 7v10" />
+                </svg>
+              </div>
+            </div>
+            <div className="leading-tight">
+              <span className="block text-lg font-semibold text-white leading-tight">
+                {corporateMark.lead}
+                {corporateMark.tail && <span className="text-gray-400"> {corporateMark.tail}</span>}
+              </span>
+              <span className="block text-[9px] uppercase tracking-[0.38em] text-sky-400">Operations Hub</span>
+            </div>
+          </div>
+          <button
+            onClick={closeSidebar}
+            className="p-2 rounded-full hover:bg-gray-900 text-gray-400 hover:text-white transition-colors"
+            aria-label="Close menu"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        {/* User Profile - X.com compact */}
+        <div className="px-4 py-3 border-b border-gray-800 bg-black flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+            {user.name.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white truncate">{user.name}</p>
+            <p className="text-xs text-gray-500">{user.role}</p>
+          </div>
+        </div>
+
+        {/* Navigation Menu - X.com minimalist */}
+        <nav className="flex-1 px-2 py-2">
           <button 
-            onClick={() => setView('dashboard')} 
-            className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+            onClick={() => { setView('dashboard'); closeSidebar(); }} 
+            className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-colors ${
               view === 'dashboard' 
-                ? 'bg-blue-500 text-white shadow-lg transform scale-105' 
-                : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                ? 'bg-gray-900 text-white' 
+                : 'text-gray-300 hover:bg-gray-900 hover:text-white'
             }`}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
             </svg>
-            Dashboard
+            <span>Dashboard</span>
           </button>
           
           {(user.role === 'detailer' || user.role === 'technician') ? (
             <>
               <button 
-                onClick={() => setView('jobs')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('jobs'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'jobs' 
-                    ? 'bg-green-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-green-600 hover:bg-green-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                </svg>
-                New Job
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">New Job</div>
+                </div>
               </button>
               <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('me'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Profile</div>
+                </div>
               </button>
             </>
           ) : user.role === 'salesperson' ? (
             <>
               <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('me'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Profile</div>
+                </div>
               </button>
             </>
           ) : (
             <>
               <button 
-                onClick={() => setView('jobs')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('jobs'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'jobs' 
-                    ? 'bg-green-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-green-600 hover:bg-green-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                All Jobs
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Job Management</div>
+                </div>
               </button>
               <button 
-                onClick={() => setView('users')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  view === 'users' 
-                    ? 'bg-indigo-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Team
-              </button>
-              <button 
-                onClick={() => setView('qc')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('qc'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'qc' 
-                    ? 'bg-yellow-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-yellow-600 hover:bg-yellow-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                QC Review
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Quality Control</div>
+                </div>
               </button>
               <button 
-                onClick={() => setView('reports')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('reports'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'reports' 
-                    ? 'bg-orange-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-orange-600 hover:bg-orange-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                Reports
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-bold">Analytics</div>
+                </div>
               </button>
               <button 
-                onClick={() => setView('settings')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('inventory'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
+                  view === 'inventory' 
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                }`}
+              >
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18M3 17h18" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Inventory</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => { setView('users'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
+                  view === 'users' 
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                }`}
+              >
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Team Management</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => { setView('settings'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'settings' 
-                    ? 'bg-gray-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Settings
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">System Settings</div>
+                </div>
               </button>
               <button 
-                onClick={() => setView('me')} 
-                className={`px-6 py-3 text-sm font-semibold rounded-2xl whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                onClick={() => { setView('me'); closeSidebar(); }} 
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 ${
                   view === 'me' 
-                    ? 'bg-purple-500 text-white shadow-lg transform scale-105' 
-                    : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
+                    ? 'bg-gray-900 text-white' 
+                    : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                 }`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Me
+                <div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="font-semibold text-sm">Profile</div>
+                </div>
               </button>
             </>
           )}
+        </nav>
+
+        {/* Bottom Section - Settings & Logout */}
+        <div className="p-5 border-t border-gray-800 space-y-1">
+          <button
+            onClick={() => {
+              closeSidebar();
+              setShowSettings(true);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 text-gray-300 hover:bg-gray-900 hover:text-white"
+          >
+            <div>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+              </svg>
+            </div>
+            <span className="font-semibold text-sm">Preferences</span>
+          </button>
+          
+          <button 
+            onClick={() => {
+              closeSidebar();
+              onLogout();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-full transition-all duration-200 text-gray-300 hover:bg-gray-900 hover:text-white"
+          >
+            <div>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </div>
+            <span className="font-semibold text-sm">Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        currentTheme={theme}
+        onThemeChange={() => {}} // Theme locked to dark mode
+        userRole={user.role}
+      />
+
+      {/* Main App Container */}
+      <div className="min-h-screen bg-black flex flex-1">
+        {/* Main Content Area - X.com Style */}
+        <div className="flex-1 bg-black overflow-y-auto">
+          {/* Top Header Bar - X.com minimalist */}
+          <div className="bg-black border-b border-gray-800 px-4 py-3 sticky top-0 z-10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  className="p-2 rounded-full hover:bg-gray-900 text-gray-400 hover:text-white"
+                  onClick={toggleSidebar}
+                  aria-label="Menu"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-2xl ring-1 ring-white/10 shadow-lg shadow-blue-500/30 bg-black">
+                    <img src="/brand.svg" alt="Cleanup Tracker" className="w-10 h-10 rounded-2xl hidden sm:block" onError={(e)=>{e.currentTarget.style.display='none';}}/>
+                    <div className="sm:hidden flex items-center justify-center w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500">
+                      <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7.5c-1.2-2.1-3.4-3.5-6-3.5-3.9 0-7 3.1-7 7s3.1 7 7 7c2.6 0 4.8-1.4 6-3.5" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 7v10" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="leading-tight">
+                    <span className="text-sm font-semibold text-white">
+                      {corporateMark.lead}
+                      {corporateMark.tail && <span className="text-gray-400"> {corporateMark.tail}</span>}
+                    </span>
+                  </div>
+                </div>
+                <div className="hidden sm:block h-8 w-px bg-gray-800" />
+                <div className="leading-tight">
+                  <span className="text-[9px] uppercase tracking-[0.28em] text-gray-500">Current View</span>
+                  <h2 className="text-lg font-semibold text-white">{viewTitle}</h2>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="hidden sm:inline-flex items-center gap-2 rounded-full border border-gray-800 bg-black/40 px-3 py-1 text-[11px] uppercase tracking-wide text-gray-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  {user.role}
+                </span>
+                <div className="text-xs text-gray-500 font-mono hidden sm:block">
+                  {new Date().toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Content Container - reduced padding for more space */}
+          <div className="p-3 sm:p-4">
+          {/* Detailer Views */}
+          {(user.role === 'detailer' || user.role === 'technician') && (
+            <>
+              {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => { setView('jobs'); closeSidebar(); }} />}
+              {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); closeSidebar(); }} />}
+              {view === 'me' && <MySettingsView user={user} />}
+            </>
+          )}
+
+          {/* Manager Views */}
+          {user.role === 'manager' && (
+            <>
+              {view === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} dashboardStats={dashboardStats} />}
+              {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
+              {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
+              {view === 'users' && <UsersView users={users} onDeleteUser={deleteUser} onRefresh={loadInitialData} />}
+              {view === 'reports' && <SimpleReports jobs={jobs} users={users} theme={theme} />}
+              {view === 'inventory' && <EnterpriseInventory theme={theme} />}
+              {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
+              {view === 'me' && <MySettingsView user={user} />}
+            </>
+          )}
+
+          {/* Salesperson Views */}
+          {user.role === 'salesperson' && (
+            <>
+              {view === 'dashboard' && <SalespersonDashboard user={user} jobs={jobs} />}
+              {view === 'me' && <MySettingsView user={user} />}
+            </>
+          )}
+        </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 bg-gray-50 overflow-y-auto">
-        {/* Detailer Views */}
-        {(user.role === 'detailer' || user.role === 'technician') && (
-          <>
-            {view === 'dashboard' && <DetailerDashboard user={user} jobs={activeJobs} completedJobs={completedJobs} userActiveJob={userActiveJob} onStopWork={handleStopWork} onOpenScanner={() => setShowScanner(true)} onGoToNewJob={() => setView('jobs')} />}
-            {view === 'jobs' && <DetailerNewJob user={user} onSearch={handleSearch} searchResults={searchResults} isSearching={isSearching} searchTerm={searchTerm} setSearchTerm={setSearchTerm} showScanner={showScanner} setShowScanner={setShowScanner} onScanSuccess={handleScanSuccess} hasSearched={hasSearched} onJobCreated={async () => { await loadInitialData(); setView('dashboard'); }} />}
-            {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}        {/* Manager Views */}
-    {user.role === 'manager' && (
-          <>
-            {view === 'dashboard' && <ManagerDashboard jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} dashboardStats={dashboardStats} />}
-            {view === 'jobs' && <JobsView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
-            {view === 'qc' && <QCView jobs={jobs} users={users} currentUser={user} onRefresh={loadInitialData} />}
-            {view === 'users' && <UsersView users={users} detailers={detailers} onDeleteUser={deleteUser} />}
-            {view === 'reports' && <SimpleReports jobs={jobs} users={users} theme={theme} />}
-            {view === 'settings' && <SettingsView settings={settings} onSettingsChange={setSettings} />}
-      {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}
-
-        {/* Salesperson Views */}
-        {user.role === 'salesperson' && (
-          <>
-            {view === 'dashboard' && <SalespersonDashboard user={user} jobs={jobs} />}
-            {view === 'me' && <MySettingsView user={user} />}
-          </>
-        )}
-      </div>
-    </div>
+      {/* 🚀 Enterprise Command Palette */}
+      {showCommandPalette && (
+        <CommandPalette
+          isOpen={showCommandPalette}
+          onClose={() => setShowCommandPalette(false)}
+          onSelect={(action) => {
+            setShowCommandPalette(false);
+            closeSidebar();
+            if (action.view) setView(action.view);
+            if (action.handler) action.handler();
+          }}
+          items={[
+            { id: 'dashboard', label: 'Go to Dashboard', view: 'dashboard', icon: '🏠' },
+            { id: 'jobs', label: 'View Jobs', view: 'jobs', icon: '📋' },
+            { id: 'reports', label: 'View Reports', view: 'reports', icon: '📊' },
+            { id: 'users', label: 'Manage Users', view: 'users', icon: '👥' },
+            { id: 'settings', label: 'Settings', view: 'settings', icon: '⚙️' },
+            { id: 'scanner', label: 'Open VIN Scanner', handler: () => setShowScanner(true), icon: '📱' },
+            { id: 'refresh', label: 'Refresh Data', handler: loadInitialData, icon: '🔄' },
+            { id: 'logout', label: 'Sign Out', handler: onLogout, icon: '🚪', destructive: true }
+          ].filter(item => {
+            // Filter based on user role
+            if (user.role === 'detailer' && ['users', 'reports'].includes(item.id)) return false;
+            if (user.role === 'salesperson' && ['users', 'jobs', 'reports'].includes(item.id)) return false;
+            return true;
+          })}
+        />
+      )}
+    </>
   );
 }
 
-// Detailer Dashboard Component
+// Enhanced Enterprise Detailer Dashboard Component
 function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWork, onOpenScanner, onGoToNewJob }) {
+  const [showStats, setShowStats] = useState(true);
+  const [showTimeline, setShowTimeline] = useState(false);
   const [filterDate, setFilterDate] = useState('');
   const [filterServiceType, setFilterServiceType] = useState('');
-  const [showStats, setShowStats] = useState(false);
-  const myJobsToday = useMemo(() => {
-    if (!completedJobs || !Array.isArray(completedJobs)) return 0;
-    return completedJobs.filter(j => {
-      const jobDate = j.date || j.completedAt || j.startTime || j.createdAt;
-      return DateUtils.isToday(jobDate) && (
-        j.assignedTechnicianIds?.includes(user.id) || 
-        j.technicianId === user.id ||
-        j.technicianId === user.pin
-      );
-    }).length;
+  
+  // Calculate performance metrics
+  const performanceMetrics = useMemo(() => {
+    if (!completedJobs || !Array.isArray(completedJobs)) return {
+      todayJobs: 0,
+      weekJobs: 0,
+      monthJobs: 0,
+      avgTime: 0,
+      efficiency: 0
+    };
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const myJobs = completedJobs.filter(j => 
+      j.assignedTechnicianIds?.includes(user.id) || 
+      j.technicianId === user.id ||
+      j.technicianId === user.pin
+    );
+
+    const todayJobs = myJobs.filter(j => {
+      const jobDate = new Date(j.date || j.completedAt || j.startTime || j.createdAt);
+      return jobDate >= today;
+    });
+
+    const weekJobs = myJobs.filter(j => {
+      const jobDate = new Date(j.date || j.completedAt || j.startTime || j.createdAt);
+      return jobDate >= weekAgo;
+    });
+
+    const monthJobs = myJobs.filter(j => {
+      const jobDate = new Date(j.date || j.completedAt || j.startTime || j.createdAt);
+      return jobDate >= monthAgo;
+    });
+
+    const totalTime = todayJobs.reduce((sum, job) => sum + (job.duration || 0), 0);
+    const avgTime = todayJobs.length > 0 ? Math.round(totalTime / todayJobs.length) : 0;
+    
+    // Calculate efficiency (jobs per hour)
+    const efficiency = todayJobs.length > 0 && totalTime > 0 ? 
+      Math.round((todayJobs.length / (totalTime / 60)) * 10) / 10 : 0;
+
+    return {
+      todayJobs: todayJobs.length,
+      weekJobs: weekJobs.length,
+      monthJobs: monthJobs.length,
+      avgTime,
+      efficiency,
+      recentJobs: todayJobs.slice(-5).reverse()
+    };
   }, [completedJobs, user.id, user.pin]);
+
+  // Extract today's job count for easy access
+  const myJobsToday = performanceMetrics.todayJobs;
 
   const [details, setDetails] = useState(null);
   const [elapsed, setElapsed] = useState(0); // seconds
-  const [showTimeline, setShowTimeline] = useState(false);
 
   const completeJob = async (status) => {
     try {
-      // Use the same completion logic but with different status
-      if (status === 'qc_required') {
-        await V2.put(`/jobs/${userActiveJob.id}/status`, { status: 'QC Required' });
-      } else {
-        await V2.put(`/jobs/${userActiveJob.id}/status`, { status: 'Completed' });
+      const jobId = userActiveJob?.id || userActiveJob?._id;
+      if (!jobId) {
+        alert('Cannot update status: missing job id');
+        return;
       }
+
+      const nextStatus = status === 'qc_required' ? 'QC Required' : 'Completed';
+      await V2.put(`/jobs/${jobId}/status`, { status: nextStatus });
       onStopWork(); // This will refresh the data
     } catch (error) {
       console.error('Failed to complete job:', error);
@@ -1780,7 +2479,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
 
   // Add error handling for the dashboard after all hooks
   if (!user) {
-    return <div className="text-gray-900 p-4">Error: No user data found</div>;
+    return <div className="text-white p-4">Error: No user data found</div>;
   }
 
   console.log('DetailerDashboard render:', { user, jobs: jobs?.length, completedJobs: completedJobs?.length }); // Debug
@@ -1793,114 +2492,85 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Current Job Status */}
+    <div className="min-h-screen bg-black p-4">
+      <div className="max-w-4xl mx-auto space-y-3">
+        {/* Current Job Status - X.com Dark Style */}
         {userActiveJob ? (
-          <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 transform hover:scale-[1.02] transition-all duration-300">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-gradient-to-r from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900">Current Job</h3>
-            </div>
-            
-            <div className="grid md:grid-cols-3 gap-6 mb-8">
-              <div className="md:col-span-2">
-                <h4 className="text-3xl font-bold text-gray-900 mb-3">{userActiveJob.vehicleDescription}</h4>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="bg-blue-50 rounded-2xl p-4">
-                    <p className="text-blue-600 font-semibold text-sm mb-1">Service Type</p>
-                    <p className="text-blue-900 font-bold text-lg">{userActiveJob.serviceType}</p>
-                  </div>
-                  <div className="bg-purple-50 rounded-2xl p-4">
-                    <p className="text-purple-600 font-semibold text-sm mb-1">Stock Number</p>
-                    <p className="text-purple-900 font-bold text-lg">{userActiveJob.stockNumber}</p>
-                  </div>
+          <div className="bg-black rounded-xl p-4 border border-gray-800 hover:border-gray-700 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center border border-gray-800">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 </div>
-                {details && (
-                  <div className="bg-gray-50 rounded-2xl p-4">
-                    <p className="text-gray-600 font-medium text-sm mb-2">
-                      Started: {DateUtils.formatDate(
-                        (details.job?.startedAt) || (details.events?.[0]?.timestamp) || Date.now(),
-                        { hour: '2-digit', minute: '2-digit', second: '2-digit' }
-                      )}
-                    </p>
-                  </div>
-                )}
+                <div>
+                  <h3 className="text-lg font-bold text-white">Active Job</h3>
+                  <p className="text-sm text-gray-500">{userActiveJob.serviceType}</p>
+                </div>
               </div>
-              
-              <div className="flex flex-col items-center justify-center bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-6">
-                {details && (
-                  <>
-                    <p className="text-amber-600 font-semibold text-sm mb-2">Time Working</p>
-                    <p className="text-4xl font-bold text-amber-900 font-mono mb-2">{fmt(elapsed)}</p>
-                    <div className="w-full bg-amber-200 rounded-full h-2">
-                      <div className="bg-gradient-to-r from-amber-400 to-orange-500 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
-                    </div>
-                  </>
-                )}
+              <div className="text-right">
+                <p className="text-2xl font-mono font-bold text-white">{fmt(elapsed)}</p>
+                <p className="text-xs text-gray-500">Time elapsed</p>
               </div>
             </div>
             
-            <div className="flex gap-3 mb-4">
+            <div className="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-800">
+              <h4 className="text-xl font-bold text-white mb-2">{userActiveJob.vehicleDescription}</h4>
+              <div className="flex gap-3 text-sm">
+                <span className="text-gray-400">Stock: <span className="text-white font-medium">{userActiveJob.stockNumber}</span></span>
+                <span className="text-gray-600">•</span>
+                <span className="text-gray-400">VIN: <span className="text-white font-mono text-xs">{userActiveJob.vin?.slice(-8)}</span></span>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-2 mb-4">
               <button 
                 onClick={() => handleJobAction('pause')}
-                className="flex-1 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-bold py-3 px-4 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] text-sm"
+                className="bg-gray-900 hover:bg-gray-800 text-gray-300 font-medium py-2.5 px-3 rounded-lg transition-colors border border-gray-800 text-sm"
               >
                 ⏸️ Pause
               </button>
               <button 
                 onClick={() => handleJobAction('addTechnician')}
-                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-3 px-4 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] text-sm"
+                className="bg-gray-900 hover:bg-gray-800 text-gray-300 font-medium py-2.5 px-3 rounded-lg transition-colors border border-gray-800 text-sm"
               >
-                👥 Add Helper
+                👥 Helper
               </button>
               <button 
                 onClick={() => handleJobAction('message')}
-                className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-3 px-4 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] text-sm"
+                className="bg-gray-900 hover:bg-gray-800 text-gray-300 font-medium py-2.5 px-3 rounded-lg transition-colors border border-gray-800 text-sm"
               >
-                💬 Message
+                💬 Note
               </button>
             </div>
             
-            <div className="flex flex-col gap-4">
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => completeJob('completed')}
-                  className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-4 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
-                >
-                  ✅ Complete - Ready for Delivery
-                </button>
-                <button 
-                  onClick={() => completeJob('qc_required')}
-                  className="flex-1 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-bold py-4 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
-                >
-                  🔍 Complete - Needs QC Review
-                </button>
-              </div>
-              {details && (
-                <button 
-                  onClick={() => setShowTimeline(!showTimeline)} 
-                  className="px-6 py-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-all duration-200 shadow-md hover:shadow-lg"
-                >
-                  {showTimeline ? 'Hide' : 'Show'} Timeline
-                </button>
-              )}
-            </div>
+            <button 
+              onClick={() => completeJob('qc_required')}
+              className="w-full bg-white hover:bg-gray-200 text-black font-bold py-3 px-4 rounded-full transition-all duration-200"
+            >
+              ✅ Complete Detail
+            </button>
+            
+            {details && (
+              <button 
+                onClick={() => setShowTimeline(!showTimeline)} 
+                className="w-full mt-2 px-4 py-2 bg-black hover:bg-gray-900 text-gray-400 hover:text-gray-300 font-medium rounded-lg transition-colors text-sm border border-gray-800"
+              >
+                {showTimeline ? '▲ Hide' : '▼ Show'} Timeline
+              </button>
+            )}
             
             {showTimeline && details && (
-              <div className="mt-6 bg-gray-50 rounded-2xl p-6 border border-gray-100">
-                <h5 className="font-bold text-gray-900 mb-4">Job Timeline</h5>
-                <ul className="space-y-3 max-h-40 overflow-auto">
+              <div className="mt-4 bg-black rounded-lg p-4 border border-gray-800">
+                <h5 className="font-semibold text-white mb-3 text-sm">Job Timeline</h5>
+                <ul className="space-y-2 max-h-32 overflow-auto">
                   {(details.events || []).map((ev, idx) => (
-                    <li key={idx} className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <li key={idx} className="flex items-center gap-2 p-2 bg-gray-900 rounded-lg">
+                      <div className="w-1.5 h-1.5 bg-gray-500 rounded-full"></div>
                       <div>
-                        <span className="font-semibold text-gray-900">{ev.type}</span>
-                        <p className="text-gray-600 text-sm">{DateUtils.formatDate(ev.timestamp)} {ev.userName ? `• ${ev.userName}` : ''}</p>
+                        <span className="font-medium text-white text-xs">{ev.type}</span>
+                        <p className="text-gray-500 text-xs">{DateUtils.formatDate(ev.timestamp)} {ev.userName ? `• ${ev.userName}` : ''}</p>
                       </div>
                     </li>
                   ))}
@@ -1909,33 +2579,25 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                </svg>
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900">Start a New Job</h3>
-            </div>
-            
-            <p className="text-gray-600 mb-6 text-lg">Scan a VIN or search by VIN/Stock to begin working.</p>
-            
-            <div className="mb-6">
+          <div className="bg-black rounded-xl p-4 border border-gray-800">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-white">Start a New Job</h3>
               <button
                 onClick={async () => { try { await V2.post('/vehicles/refresh'); alert('Inventory refreshed. Try your search again.'); } catch (e) { alert('Refresh failed: ' + (e.response?.data?.error || e.message)); } }}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-gray-300 font-medium rounded-full transition-colors text-xs border border-gray-800"
               >
-                Refresh Inventory
+                🔄 Refresh
               </button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <p className="text-gray-500 mb-3 text-sm">Scan a VIN or search by VIN/Stock to begin working.</p>
+            
+            <div className="grid grid-cols-2 gap-3">
               <button 
                 onClick={onOpenScanner}
-                className="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-6 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] flex items-center justify-center gap-3"
+                className="group bg-gray-900 hover:bg-gray-800 text-white font-medium py-4 px-4 rounded-lg transition-colors border border-gray-800 flex items-center justify-center gap-2"
               >
-                <svg className="w-6 h-6 group-hover:scale-110 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
@@ -1943,47 +2605,42 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               </button>
               <button 
                 onClick={onGoToNewJob}
-                className="group bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-6 px-6 rounded-2xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] flex items-center justify-center gap-3"
+                className="group bg-white hover:bg-gray-200 text-black font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
-                <svg className="w-6 h-6 group-hover:scale-110 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
-                Search Vehicle
+                Search
               </button>
             </div>
           </div>
         )}
 
-        {/* Today's Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 transform hover:scale-[1.02] transition-all duration-300">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 bg-gradient-to-r from-green-400 to-emerald-500 rounded-2xl flex items-center justify-center shadow-lg">
-                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {/* Today's Stats - X Style */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-black rounded-xl p-4 border border-gray-800 hover:border-gray-700 transition-colors">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center border border-gray-800">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <div>
-                <h4 className="text-gray-600 text-sm font-semibold uppercase tracking-wider">Completed Today</h4>
-                <p className="text-4xl font-bold text-gray-900">{myJobsToday}</p>
+                <p className="text-gray-500 text-xs">Today</p>
+                <p className="text-2xl font-bold text-white">{myJobsToday}</p>
               </div>
             </div>
-            <div className="bg-green-50 rounded-2xl p-4">
-              <p className="text-green-700 font-semibold text-sm">Great work! Keep it up!</p>
-              <div className="mt-2 w-full bg-green-200 rounded-full h-2">
-                <div className="bg-gradient-to-r from-green-400 to-emerald-500 h-2 rounded-full" style={{width: Math.min(100, (myJobsToday / 8) * 100) + '%'}}></div>
-              </div>
-            </div>
+            <p className="text-gray-500 text-xs">Completed jobs</p>
           </div>
           
-          <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 transform hover:scale-[1.02] transition-all duration-300">
-            <div className="flex items-center gap-4 mb-4">
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${
+          <div className="bg-black rounded-xl p-4 border border-gray-800 hover:border-gray-700 transition-colors">
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${
                 userActiveJob 
-                  ? 'bg-gradient-to-r from-amber-400 to-orange-500' 
-                  : 'bg-gradient-to-r from-blue-400 to-purple-500'
+                  ? 'bg-gray-900 border-gray-700' 
+                  : 'bg-gray-900 border-gray-800'
               }`}>
-                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {userActiveJob ? (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   ) : (
@@ -1992,47 +2649,110 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                 </svg>
               </div>
               <div>
-                <h4 className="text-gray-600 text-sm font-semibold uppercase tracking-wider">Active Job</h4>
-                <p className="text-4xl font-bold text-gray-900">{userActiveJob ? 1 : 0}</p>
+                <p className="text-gray-500 text-xs">Active</p>
+                <p className="text-2xl font-bold text-white">{userActiveJob ? 1 : 0}</p>
               </div>
             </div>
-            <div className={`rounded-2xl p-4 ${
-              userActiveJob 
-                ? 'bg-amber-50' 
-                : 'bg-blue-50'
-            }`}>
-              <p className={`font-semibold text-sm ${
-                userActiveJob 
-                  ? 'text-amber-700' 
-                  : 'text-blue-700'
-              }`}>
-                {userActiveJob ? 'Keep going! You\'re doing great!' : 'Ready to start your next job'}
-              </p>
-              <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                <div className={`h-2 rounded-full ${
-                  userActiveJob 
-                    ? 'bg-gradient-to-r from-amber-400 to-orange-500 animate-pulse' 
-                    : 'bg-gradient-to-r from-blue-400 to-purple-500'
-                }`} style={{width: userActiveJob ? '100%' : '0%'}}></div>
-              </div>
-            </div>
+            <p className="text-gray-500 text-xs">{userActiveJob ? 'In progress' : 'Ready to start'}</p>
           </div>
         </div>
 
+        {/* 🚀 Enterprise Personal Analytics */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Performance Efficiency Ring */}
+          <GlassCard className="p-3 text-center">
+            <h4 className="text-sm font-semibold text-white mb-2 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              Personal Efficiency
+            </h4>
+            <ProgressRing 
+              progress={Math.min(100, (performanceMetrics.efficiency || 0) * 10)} 
+              size={120} 
+              color="#1DA1F2"
+              label={`${performanceMetrics.efficiency || 0}/10 Score`}
+            />
+            <p className="text-sm text-gray-500 mt-2">Based on avg completion time</p>
+          </GlassCard>
+
+          {/* Weekly Performance Trend */}
+          <GlassCard className="p-3">
+            <h4 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              7-Day Trend
+            </h4>
+            <Sparkline
+              data={(() => {
+                // Generate personal performance data for the last 7 days
+                const last7Days = Array.from({length: 7}, (_, i) => {
+                  const date = new Date();
+                  date.setDate(date.getDate() - (6 - i));
+                  const dayJobs = completedJobs.filter(job => {
+                    if (!job.completedAt && !job.date) return false;
+                    const jobDate = new Date(job.completedAt || job.date);
+                    const isMyJob = job.assignedTechnicianIds?.includes(user.id) || 
+                                   job.technicianId === user.id ||
+                                   job.technicianId === user.pin;
+                    return isMyJob && jobDate.toDateString() === date.toDateString();
+                  });
+                  return dayJobs.length;
+                });
+                return last7Days;
+              })()}
+              width={180}
+              height={60}
+              color="#1DA1F2"
+            />
+            <div className="mt-2 text-center">
+              <p className="text-sm text-gray-500">Jobs completed per day</p>
+            </div>
+          </GlassCard>
+
+          {/* Achievement Badge */}
+          <GlassCard className="p-3">
+            <h4 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              Achievement
+            </h4>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-gray-900 border border-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
+                <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+              </div>
+              <h5 className="font-bold text-white">
+                {myJobsToday >= 5 ? 'Productivity Star' : 
+                 myJobsToday >= 3 ? 'Consistent Performer' : 
+                 myJobsToday >= 1 ? 'Getting Started' : 'Ready to Begin'}
+              </h5>
+              <p className="text-sm text-gray-500 mt-1">
+                {myJobsToday >= 5 ? 'Excellent job today!' : 
+                 myJobsToday >= 3 ? 'Great consistency!' : 
+                 myJobsToday >= 1 ? 'Keep up the momentum!' : 'Your first job awaits!'}
+              </p>
+            </div>
+          </GlassCard>
+        </div>
+
         {/* My Job History */}
-        <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
+        <div className="bg-black rounded-3xl p-6 border border-gray-800">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-10 h-10 bg-gray-900 border border-gray-800 rounded-xl flex items-center justify-center">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
               </div>
-              <h3 className="text-2xl font-bold text-gray-900">My Job History & Analytics</h3>
+              <h3 className="text-xl font-semibold text-white">My Job History & Analytics</h3>
             </div>
             <button
               onClick={() => setShowStats(!showStats)}
-              className="px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors"
+              className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-gray-300 rounded-full font-medium border border-gray-800 transition-colors text-sm"
             >
               {showStats ? 'Hide Stats' : 'Show Stats'}
             </button>
@@ -2040,10 +2760,10 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
 
           {/* Stats Panel */}
           {showStats && (
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4">
-                <h4 className="text-blue-700 font-semibold mb-1">Total Completed</h4>
-                <p className="text-2xl font-bold text-blue-900">
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Total Completed</p>
+                <p className="text-2xl font-bold text-white mt-1">
                   {completedJobs.filter(job => 
                     job.technicianId === user.id || 
                     job.technicianName === user.name || 
@@ -2051,9 +2771,9 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                   ).length}
                 </p>
               </div>
-              <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-4">
-                <h4 className="text-green-700 font-semibold mb-1">Avg Time/Job</h4>
-                <p className="text-2xl font-bold text-green-900">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Time / Job</p>
+                <p className="text-2xl font-bold text-white mt-1">
                   {(() => {
                     const myJobs = completedJobs.filter(job => 
                       (job.technicianId === user.id || job.technicianName === user.name) && 
@@ -2067,9 +2787,9 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                   })()}
                 </p>
               </div>
-              <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg p-4">
-                <h4 className="text-purple-700 font-semibold mb-1">This Week</h4>
-                <p className="text-2xl font-bold text-purple-900">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">This Week</p>
+                <p className="text-2xl font-bold text-white mt-1">
                   {completedJobs.filter(job => {
                     if (!job.completedAt) return false;
                     const jobDate = new Date(job.completedAt);
@@ -2090,7 +2810,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full bg-black border border-gray-700 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div className="w-44">
@@ -2098,7 +2818,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               <select
                 value={filterServiceType}
                 onChange={(e) => setFilterServiceType(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full bg-black border border-gray-700 rounded-lg py-1.5 px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">All Services</option>
                 <option value="Detail">Detail</option>
@@ -2116,7 +2836,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                   setFilterDate('');
                   setFilterServiceType('');
                 }}
-                className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+                className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-gray-300 rounded-lg text-sm font-medium transition-colors border border-gray-800"
               >
                 Clear
               </button>
@@ -2149,44 +2869,44 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                 <button
                   key={job.id}
                   onClick={() => openJobDetails(job)}
-                  className="w-full text-left bg-gray-50 hover:bg-gray-100 rounded-2xl p-6 border border-gray-100 hover:shadow-lg transition-all duration-200 transform hover:scale-[1.01]"
+                  className="w-full text-left bg-black hover:bg-gray-900 rounded-2xl p-6 border border-gray-800 hover:shadow-lg transition-all duration-200 transform hover:scale-[1.01]"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-3">
-                        <h4 className="text-gray-900 font-bold text-xl">{job.vehicleDescription}</h4>
+                        <h4 className="text-white font-semibold text-lg">{job.vehicleDescription}</h4>
                         {job.color && (
-                          <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full font-semibold">
+                          <span className="px-2.5 py-0.5 border border-gray-700 text-gray-300 text-xs rounded-full font-medium">
                             {job.color}
                           </span>
                         )}
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                        <div className="bg-white rounded-xl p-3">
+                        <div className="bg-black rounded-xl p-3">
                           <p className="text-gray-500 font-medium mb-1">Stock Number</p>
-                          <p className="text-gray-900 font-bold">{job.stockNumber}</p>
+                          <p className="text-white font-bold">{job.stockNumber}</p>
                         </div>
-                        <div className="bg-white rounded-xl p-3">
+                        <div className="bg-black rounded-xl p-3">
                           <p className="text-gray-500 font-medium mb-1">VIN</p>
-                          <p className="font-mono text-gray-900 font-bold text-sm">{job.vin?.slice(-6) || 'N/A'}</p>
+                          <p className="font-mono text-white font-bold text-sm">{job.vin?.slice(-6) || 'N/A'}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 text-sm mb-3">
-                        <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-semibold">{job.serviceType}</span>
+                      <div className="flex items-center gap-3 text-xs mb-3">
+                        <span className="px-2.5 py-0.5 border border-gray-700 text-gray-300 rounded-full font-medium uppercase tracking-wide">{job.serviceType}</span>
                         {job.priority && job.priority !== 'Normal' && (
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                            job.priority === 'Urgent' ? 'bg-red-100 text-red-700' :
-                            job.priority === 'High' ? 'bg-orange-100 text-orange-700' :
-                            'bg-gray-100 text-gray-700'
+                          <span className={`px-2.5 py-0.5 rounded-full font-medium uppercase tracking-wide border ${
+                            job.priority === 'Urgent' ? 'border-red-500 text-red-400' :
+                            job.priority === 'High' ? 'border-amber-500 text-amber-400' :
+                            'border-gray-700 text-gray-400'
                           }`}>
                             {job.priority}
                           </span>
                         )}
                       </div>
                       {job.salesPerson && (
-                        <p className="text-purple-700 font-semibold text-sm mb-2">Sales: {job.salesPerson}</p>
+                        <p className="text-gray-400 text-xs mb-2">Sales: {job.salesPerson}</p>
                       )}
-                      <div className="text-sm text-gray-600">
+                      <div className="text-xs text-gray-500 space-y-1">
                         {job.startTime && (
                           <p>Started: {DateUtils.formatDateTime(job.startTime)}</p>
                         )}
@@ -2196,16 +2916,18 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                       </div>
                     </div>
                     <div className="text-right ml-6 flex flex-col items-end">
-                      <span className={`px-4 py-2 rounded-2xl text-sm font-bold mb-3 ${
-                        job.status === 'In Progress' 
-                          ? 'bg-yellow-100 text-yellow-800' 
-                          : 'bg-green-100 text-green-800'
+                      <span className={`px-3 py-1.5 rounded-full text-xs font-semibold mb-3 border ${
+                        job.status === 'In Progress'
+                          ? 'border-amber-500 text-amber-400'
+                          : job.status === 'QC Required'
+                            ? 'border-blue-500 text-blue-400'
+                            : 'border-gray-600 text-gray-300'
                       }`}>
                         {job.status}
                       </span>
                       {job.completedAt && (job.startTime || job.startedAt) && (
-                        <div className="bg-green-50 rounded-2xl p-4 text-center">
-                          <p className="text-green-700 font-bold text-2xl">
+                        <div className="bg-black border border-gray-800 rounded-xl p-3 text-center">
+                          <p className="text-white font-mono text-sm">
                             {DateUtils.formatDuration(
                               DateUtils.calculateDuration(
                                 job.startTime || job.startedAt, 
@@ -2213,7 +2935,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                               )
                             )}
                           </p>
-                          <p className="text-green-600 text-sm font-semibold">Total Time</p>
+                          <p className="text-gray-500 text-xs mt-1">Total Time</p>
                         </div>
                       )}
                     </div>
@@ -2226,13 +2948,13 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               job.technicianId === user.pin
             ).length === 0 && (
               <div className="text-center py-12">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-16 h-16 bg-gray-900 border border-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                 </div>
-                <p className="text-gray-900 font-semibold">No jobs completed yet</p>
-                <p className="text-gray-600 text-sm mt-1">Your completed jobs will appear here</p>
+                <p className="text-white font-semibold">No jobs completed yet</p>
+                <p className="text-gray-500 text-xs mt-1">Your completed jobs will appear here</p>
               </div>
             )}
           </div>
@@ -2241,22 +2963,15 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
 
       {/* Job Details Modal */}
         {selectedJob && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-3xl p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100">
-              <div className="flex justify-between items-start mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <h4 className="text-gray-900 font-bold text-2xl">Job Details</h4>
-                </div>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-black rounded-xl p-4 w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-800">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-white font-semibold text-base">Job Details</h4>
                 <button 
                   onClick={closeJobDetails} 
-                  className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-2xl flex items-center justify-center transition-colors duration-200"
+                  className="w-8 h-8 bg-gray-900 hover:bg-gray-800 rounded-full flex items-center justify-center transition-colors"
                 >
-                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -2285,27 +3000,27 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
               )}
             
             {jobDetails && (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {/* Compact Vehicle & Job Information */}
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-black rounded-xl p-3 border border-gray-800">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="md:col-span-2">
-                      <h5 className="text-blue-900 font-semibold mb-2 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        Vehicle Details
+                      <h5 className="text-white font-semibold text-sm mb-2 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Vehicle
                       </h5>
-                      <p className="text-gray-900 font-bold text-lg mb-2">{selectedJob.vehicleDescription}</p>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <div className="flex items-center gap-1"><span className="text-gray-600">VIN:</span><span className="font-mono text-gray-900 text-xs">{jobDetails.job?.vin}</span></div>
-                        <div className="flex items-center gap-1"><span className="text-gray-600">Stock:</span><span className="text-gray-900 font-medium">{jobDetails.job?.stockNumber}</span></div>
-                        {jobDetails.job?.color && <div className="flex items-center gap-1"><span className="text-gray-600">Color:</span><span className="text-gray-900 font-medium">{jobDetails.job.color}</span></div>}
-                        <div className="flex items-center gap-1"><span className="text-gray-600">Service:</span><span className="text-blue-700 font-bold">{jobDetails.job?.serviceType}</span></div>
+                      <p className="text-white font-semibold text-base mb-2">{selectedJob.vehicleDescription}</p>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                        <div className="flex items-center gap-1"><span className="text-gray-500">VIN:</span><span className="font-mono text-white">{jobDetails.job?.vin}</span></div>
+                        <div className="flex items-center gap-1"><span className="text-gray-500">Stock:</span><span className="text-white">{jobDetails.job?.stockNumber}</span></div>
+                        {jobDetails.job?.color && <div className="flex items-center gap-1"><span className="text-gray-500">Color:</span><span className="text-white">{jobDetails.job.color}</span></div>}
+                        <div className="flex items-center gap-1"><span className="text-gray-500">Service:</span><span className="text-blue-400">{jobDetails.job?.serviceType}</span></div>
                         <div className="flex items-center gap-1">
                           <span className="text-gray-600">Priority:</span>
                           <select 
                             value={jobDetails.job?.priority || 'Normal'} 
                             onChange={(e) => handlePriorityChange(e.target.value)}
-                            className="bg-white text-gray-900 border border-gray-300 rounded px-1.5 py-0.5 text-xs font-medium"
+                            className="bg-black text-white border border-gray-700 rounded px-1.5 py-0.5 text-xs font-medium"
                           >
                             <option value="Low">Low</option>
                             <option value="Normal">Normal</option>
@@ -2320,34 +3035,32 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                             value={jobDetails.job?.salesPerson || ''}
                             onChange={(e) => handleSalesPersonChange(e.target.value)}
                             placeholder="Name"
-                            className="bg-white text-gray-900 border border-gray-300 rounded px-1.5 py-0.5 text-xs flex-1"
+                            className="bg-black text-white border border-gray-700 rounded px-1.5 py-0.5 text-xs flex-1"
                           />
                         </div>
                       </div>
                     </div>
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <h5 className="text-gray-900 font-semibold mb-2 text-sm flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <div className="bg-black rounded-lg p-3 border border-gray-800">
+                      <h5 className="text-white font-semibold mb-2 text-sm flex items-center gap-1">
+                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         Timing
                       </h5>
-                      <div className={`text-sm font-bold mb-2 ${
-                        jobDetails.job?.status === 'In Progress' ? 'text-yellow-700' : 'text-green-700'
-                      }`}>
+                      <div className="text-xs text-gray-400 uppercase tracking-wide mb-2">
                         {jobDetails.job?.status}
                       </div>
                       {jobDetails.job?.startTime && (
                         <div className="space-y-1 text-xs">
-                          <p className="text-gray-600">Started: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.startTime).toLocaleTimeString()}</span></p>
+                          <p className="text-gray-500">Started: <span className="text-white font-medium">{new Date(jobDetails.job.startTime).toLocaleTimeString()}</span></p>
                           {jobDetails.job?.status === 'In Progress' && (
                             <div>
-                              <p className="text-gray-600 mb-1">Duration:</p>
-                              <LiveTimer startTime={jobDetails.job.startTime} className="text-yellow-700 font-mono text-xl font-bold" />
+                              <p className="text-gray-500 mb-1">Duration:</p>
+                              <LiveTimer startTime={jobDetails.job.startTime} className="text-white font-mono text-lg font-semibold" />
                             </div>
                           )}
                           {jobDetails.job?.completedAt && (
                             <div>
-                              <p className="text-gray-600">Completed: <span className="text-gray-900 font-medium">{new Date(jobDetails.job.completedAt).toLocaleTimeString()}</span></p>
-                              <p className="text-green-700 text-base font-bold mt-1">
+                              <p className="text-gray-500">Completed: <span className="text-white font-medium">{new Date(jobDetails.job.completedAt).toLocaleTimeString()}</span></p>
+                              <p className="text-white font-mono text-sm mt-1">
                                 {DateUtils.formatDuration(
                                   DateUtils.calculateDuration(jobDetails.job.startTime, jobDetails.job.completedAt)
                                 )}
@@ -2355,7 +3068,7 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                             </div>
                           )}
                           {jobDetails.job?.technicianName && (
-                            <p className="text-gray-600 pt-1 border-t border-gray-200">Tech: <span className="text-gray-900 font-medium">{jobDetails.job.technicianName}</span></p>
+                            <p className="text-gray-500 pt-1 border-t border-gray-800">Tech: <span className="text-white font-medium">{jobDetails.job.technicianName}</span></p>
                           )}
                         </div>
                       )}
@@ -2364,15 +3077,15 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                 </div>
 
                 {/* Compact Activity Timeline */}
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <h5 className="text-gray-900 font-semibold mb-2 text-sm flex items-center gap-1">
+                <div className="bg-black rounded-lg p-3 border border-gray-800">
+                  <h5 className="text-white font-semibold mb-2 text-sm flex items-center gap-1">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                     Activity Timeline
                   </h5>
                   <ul className="space-y-2 max-h-36 overflow-auto pr-1">
                     {jobDetails.job?.startTime && (
-                      <li className="text-xs border-l-2 border-green-500 pl-2 py-1">
-                        <span className="text-green-700 font-semibold">Started</span>
+                      <li className="text-xs border-l-2 border-gray-600 pl-2 py-1">
+                        <span className="text-white font-medium">Started</span>
                         <span className="text-gray-500 block text-[11px]">
                           {DateUtils.formatDateTime(jobDetails.job.startTime)}
                           {jobDetails.job?.technicianName && ` • ${jobDetails.job.technicianName}`}
@@ -2380,8 +3093,8 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                       </li>
                     )}
                     {jobDetails.job?.completedAt && (
-                      <li className="text-xs border-l-2 border-blue-500 pl-2 py-1">
-                        <span className="text-blue-700 font-semibold">Completed</span>
+                      <li className="text-xs border-l-2 border-gray-600 pl-2 py-1">
+                        <span className="text-white font-medium">Completed</span>
                         <span className="text-gray-500 block text-[11px]">
                           {DateUtils.formatDateTime(jobDetails.job.completedAt)}
                           {jobDetails.job?.duration && ` • ${DateUtils.formatDuration(jobDetails.job.duration)}`}
@@ -2391,8 +3104,8 @@ function DetailerDashboard({ user, jobs, completedJobs, userActiveJob, onStopWor
                     {(jobDetails.events || []).map((ev, idx) => {
                       const validDate = DateUtils.getValidDate(ev.timestamp || ev.at);
                       return (
-                        <li key={idx} className="text-xs border-l-2 border-gray-400 pl-2 py-1">
-                          <span className="text-gray-900 font-semibold">
+                        <li key={idx} className="text-xs border-l-2 border-gray-600 pl-2 py-1">
+                          <span className="text-white font-medium">
                             {ev.type?.replace('_', ' ')?.replace(/\b\w/g, l => l.toUpperCase()) || 'Event'}
                           </span>
                           <span className="text-gray-500 block text-[11px]">
@@ -2513,13 +3226,13 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
   return (
     <div className="space-y-6">
       {/* Scan Option */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Scan VIN Barcode</h3>
+      <div className="bg-black rounded-xl p-6 border border-gray-800 shadow-sm">
+        <h3 className="text-white font-semibold text-lg mb-4">Scan VIN Barcode</h3>
         <button 
           onClick={() => setShowScanner(true)}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
           </svg>
@@ -2528,21 +3241,21 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
       </div>
 
       {/* Search Option */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Search Vehicle</h3>
+      <div className="bg-black rounded-xl p-6 border border-gray-800 shadow-sm">
+        <h3 className="text-white font-semibold text-lg mb-4">Search Vehicle</h3>
         <form onSubmit={handleSearchSubmit} className="space-y-4">
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Enter VIN or Stock Number"
-            className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-black text-white placeholder-gray-500 border border-gray-700 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-gray-600"
           />
           <div className="flex items-center gap-2">
             <button 
               type="submit"
               disabled={isSearching || !searchTerm.trim()}
-              className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500"
+              className="flex-1 bg-white hover:bg-gray-200 text-black font-bold py-3 px-4 rounded-full transition-colors disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed"
             >
               {isSearching ? (
                 <span className="flex items-center">
@@ -2558,7 +3271,7 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
               <button
                 type="button"
                 onClick={() => { setSearchTerm(''); }}
-                className="px-4 py-3 rounded-lg border border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-100"
+                className="px-4 py-3 rounded-full border border-gray-800 text-gray-300 bg-black hover:bg-gray-900"
               >
                 Clear
               </button>
@@ -2567,32 +3280,33 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
         </form>
 
         {/* Search Results */}
+        {/* Vehicle Search Results - X Style */}
         {hasSearched && searchResults.length === 0 && !isSearching && (
-          <p className="mt-4 text-gray-600">No vehicles found. Check VIN/Stock and try again.</p>
+          <p className="mt-4 text-gray-500 text-sm">No vehicles found. Check VIN/Stock and try again.</p>
         )}
         {searchResults.length > 0 && (
           <div className="mt-4 space-y-2">
-            <h4 className="text-gray-900 font-medium">Search Results</h4>
+            <h4 className="text-white font-medium text-sm">Search Results</h4>
             {searchResults.map((vehicle, index) => (
               <div 
                 key={index}
-                className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                className={`p-3 rounded-lg cursor-pointer transition-all border ${
                   selectedVehicle?.vin === vehicle.vin 
-                    ? 'bg-blue-100 border border-blue-300' 
-                    : 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
+                    ? 'bg-gray-900 border-gray-600' 
+                    : 'bg-black border-gray-800 hover:border-gray-700 hover:bg-gray-900'
                 }`}
                 onClick={() => setSelectedVehicle(vehicle)}
               >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <p className="text-gray-900 font-semibold text-lg">{vehicle.year} {vehicle.make} {vehicle.model}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-gray-600 text-sm">VIN: <span className="font-mono">{vehicle.vin}</span></p>
-                      <p className="text-gray-600 text-sm">Stock: {vehicle.stockNumber}</p>
+                    <p className="text-white font-semibold">{vehicle.year} {vehicle.make} {vehicle.model}</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-gray-500 text-xs">VIN: <span className="font-mono text-gray-400">{vehicle.vin}</span></p>
+                      <p className="text-gray-500 text-xs">Stock: <span className="text-gray-400">{vehicle.stockNumber}</span></p>
                     </div>
                   </div>
                   {vehicle.color && (
-                    <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full font-medium">
+                    <span className="px-2 py-1 bg-gray-800 text-gray-300 text-xs rounded-full font-medium border border-gray-700">
                       {vehicle.color}
                     </span>
                   )}
@@ -2602,75 +3316,58 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
           </div>
         )}
 
-        {/* Selected Vehicle & Job Creation */}
+        {/* Selected Vehicle & Job Creation - X Style */}
         {selectedVehicle && (
-          <div className="mt-6 bg-blue-50 rounded-lg p-4 border border-blue-200">
-            <h4 className="text-blue-800 font-semibold mb-3">Selected Vehicle</h4>
-            <div className="flex justify-between items-start mb-3">
+          <div className="mt-4 bg-black rounded-lg p-4 border border-gray-800">
+            <div className="flex justify-between items-start mb-4">
               <div>
-                <p className="text-gray-900 text-lg font-bold">{selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</p>
-                <div className="flex items-center gap-4 mt-1">
-                  <p className="text-blue-700 text-sm">Stock: {selectedVehicle.stockNumber}</p>
-                  <p className="text-blue-700 text-sm">VIN: <span className="font-mono">{selectedVehicle.vin}</span></p>
+                <p className="text-white text-lg font-bold">{selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-gray-500 text-xs">Stock: <span className="text-gray-400">{selectedVehicle.stockNumber}</span></p>
+                  <p className="text-gray-500 text-xs">VIN: <span className="font-mono text-gray-400">{selectedVehicle.vin}</span></p>
                 </div>
               </div>
               {selectedVehicle.color && (
-                <span className="px-3 py-1 bg-blue-200 text-blue-900 text-sm rounded-full font-semibold">
+                <span className="px-3 py-1 bg-gray-800 text-gray-300 text-xs rounded-full font-medium border border-gray-700">
                   {selectedVehicle.color}
                 </span>
               )}
             </div>
             
-            <div className="mt-4">
-              <label className="block text-blue-800 font-medium mb-2">Service Type</label>
-              <select 
-                value={serviceType}
-                onChange={(e) => setServiceType(e.target.value)}
-                className="w-full bg-gray-50 text-gray-900 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {serviceTypes.map(type => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="mt-4">
-              <label className="block text-blue-800 font-medium mb-2">Sales Person (Optional)</label>
-              <select
-                value={salesPerson}
-                onChange={(e) => setSalesPerson(e.target.value)}
-                className="w-full bg-gray-50 text-gray-900 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select Sales Person...</option>
-                {salespersons.map((person) => (
-                  <option key={person.id || person._id} value={person.name}>
-                    {person.name}
-                  </option>
-                ))}
-              </select>
-              {salesPerson && (
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-blue-700 text-sm">Selected: {salesPerson}</span>
-                  {salespersons.find(p => p.name === salesPerson)?.phone && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const phone = salespersons.find(p => p.name === salesPerson)?.phone;
-                        const message = `New job assigned: ${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model} - ${serviceType}`;
-                        window.open(`sms:${phone}?body=${encodeURIComponent(message)}`, '_blank');
-                      }}
-                      className="text-blue-600 hover:text-blue-800 text-sm underline"
-                    >
-                      Notify
-                    </button>
-                  )}
-                </div>
-              )}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-gray-400 font-medium mb-2 text-sm">Service Type</label>
+                <select 
+                  value={serviceType}
+                  onChange={(e) => setServiceType(e.target.value)}
+                  className="w-full bg-gray-900 text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
+                >
+                  {serviceTypes.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-gray-400 font-medium mb-2 text-sm">Sales Person (Optional)</label>
+                <select
+                  value={salesPerson}
+                  onChange={(e) => setSalesPerson(e.target.value)}
+                  className="w-full bg-gray-900 text-white border border-gray-800 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
+                >
+                  <option value="">Select Sales Person...</option>
+                  {salespersons.map((person) => (
+                    <option key={person.id || person._id} value={person.name}>
+                      {person.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             
             <button 
               onClick={handleCreateJob}
-              className="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+              className="w-full mt-4 bg-white hover:bg-gray-200 text-black font-bold py-3 px-4 rounded-full transition-colors"
             >
               Start Job
             </button>
@@ -2681,8 +3378,8 @@ function DetailerNewJob({ user, onSearch, searchResults, isSearching, searchTerm
       {/* Scanner Modal */}
       {showScanner && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md border border-gray-200 shadow-lg">
-            <h3 className="text-gray-900 font-semibold text-lg mb-4">Scan VIN Barcode</h3>
+          <div className="bg-black rounded-xl p-6 w-full max-w-md border border-gray-800 shadow-lg">
+            <h3 className="text-white font-semibold text-lg mb-4">Scan VIN Barcode</h3>
             <VinScanner onSuccess={onScanSuccess} onClose={() => setShowScanner(false)} />
             <button 
               onClick={() => setShowScanner(false)}
@@ -2745,10 +3442,10 @@ function SalespersonDashboard({ user, jobs }) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-black p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-3xl p-8 shadow-xl mb-8 border border-gray-100">
+        <div className="bg-black rounded-3xl p-8 shadow-xl mb-8 border border-gray-800">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-blue-600 rounded-3xl flex items-center justify-center shadow-lg">
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2756,8 +3453,8 @@ function SalespersonDashboard({ user, jobs }) {
               </svg>
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Sales Dashboard</h1>
-              <p className="text-gray-600 text-lg">Welcome back, {user.name}</p>
+              <h1 className="text-3xl font-bold text-white">Sales Dashboard</h1>
+              <p className="text-gray-600">Welcome back, {user.name}</p>
             </div>
           </div>
           
@@ -2765,7 +3462,7 @@ function SalespersonDashboard({ user, jobs }) {
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-2xl p-6 border border-blue-200">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                 </div>
@@ -2779,7 +3476,7 @@ function SalespersonDashboard({ user, jobs }) {
             <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-6 border border-green-200">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-green-500 rounded-2xl flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
@@ -2795,7 +3492,7 @@ function SalespersonDashboard({ user, jobs }) {
             <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-2xl p-6 border border-orange-200">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
@@ -2811,25 +3508,25 @@ function SalespersonDashboard({ user, jobs }) {
         </div>
 
         {/* Jobs List */}
-        <div className="bg-white rounded-3xl p-8 shadow-xl border border-gray-100">
-          <h3 className="text-2xl font-bold text-gray-900 mb-6">My Vehicle Jobs</h3>
+        <div className="bg-black rounded-3xl p-8 shadow-xl border border-gray-800">
+          <h3 className="text-2xl font-bold text-white mb-6">My Vehicle Jobs</h3>
           
           <div className="space-y-4">
             {myJobs.map(job => (
-              <div key={job.id} className="job-card bg-gray-50 rounded-2xl p-4 md:p-3 border border-gray-200 hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-gray-300">
+              <div key={job.id} className="job-card bg-black rounded-2xl p-4 md:p-3 border border-gray-800 hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-gray-700">
                 <div className="flex justify-between items-start gap-3">
                   <div className="flex-1">
-                    <h4 className="text-base md:text-lg font-bold text-gray-900 mb-2 leading-tight">
+                    <h4 className="text-base md:text-lg font-bold text-white mb-2 leading-tight">
                       {job.year} {job.make} {job.model} {job.vehicleColor && `• ${job.vehicleColor}`}
                     </h4>
                     <div className="job-info-grid grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 text-xs md:text-sm mb-3">
                       <div>
                         <p className="text-gray-600 font-medium text-xs">VIN</p>
-                        <p className="text-gray-900 font-semibold font-mono text-xs">{job.vin?.slice(-6)}</p>
+                        <p className="text-white font-semibold font-mono text-xs">{job.vin?.slice(-6)}</p>
                       </div>
                       <div>
                         <p className="text-gray-600 font-medium text-xs">Stock</p>
-                        <p className="text-gray-900 font-semibold">{job.stockNumber}</p>
+                        <p className="text-white font-semibold">{job.stockNumber}</p>
                       </div>
                       <div>
                         <p className="text-gray-600 font-medium text-xs">Service</p>
@@ -2837,7 +3534,7 @@ function SalespersonDashboard({ user, jobs }) {
                       </div>
                       <div>
                         <p className="text-gray-600 font-medium text-xs">Technician</p>
-                        <p className="text-gray-900 font-semibold">{job.technicianName}</p>
+                        <p className="text-white font-semibold">{job.technicianName}</p>
                       </div>
                     </div>
                     
@@ -2896,7 +3593,7 @@ function SalespersonDashboard({ user, jobs }) {
             
             {myJobs.length === 0 && (
               <div className="text-center py-12">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mx-auto mb-4">
                   <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
@@ -2913,699 +3610,772 @@ function SalespersonDashboard({ user, jobs }) {
 }
 
 // Manager Dashboard Component with Auto-refresh  
+const DASHBOARD_ACCENTS = {
+  blue: 'bg-sky-400',
+  green: 'bg-emerald-400',
+  amber: 'bg-amber-400',
+  purple: 'bg-violet-400',
+  red: 'bg-rose-400',
+  slate: 'bg-slate-400'
+};
+
+const TEAM_DONUT_COLORS = ['#38bdf8', '#6366f1', '#a855f7', '#22d3ee', '#14b8a6', '#f97316', '#facc15', '#f472b6'];
+
+const formatMinutesForDisplay = (minutes) => {
+  if (!minutes || Number.isNaN(minutes)) return '—';
+  const safeMinutes = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remaining = safeMinutes % 60;
+  if (hours === 0) return `${remaining}m`;
+  if (remaining === 0) return `${hours}h`;
+  return `${hours}h ${remaining}m`;
+};
+
+const MetricCard = ({ label, value, subLabel, accent = 'blue' }) => {
+  const displayValue = typeof value === 'number' ? value.toLocaleString() : value;
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/5 bg-neutral-950/80 p-4 shadow-[0_24px_48px_-28px_rgba(15,23,42,0.9)] transition-colors hover:border-sky-500/40">
+      <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.32em] text-gray-500">
+        <span>{label}</span>
+        <span className={`h-2 w-2 rounded-full ${DASHBOARD_ACCENTS[accent] || DASHBOARD_ACCENTS.blue}`}></span>
+      </div>
+      <div className="mt-3 text-2xl font-semibold text-white">{displayValue}</div>
+      {subLabel ? <p className="mt-1 text-xs text-gray-500">{subLabel}</p> : null}
+    </div>
+  );
+};
+
+const SectionCard = ({ title, action, children, className = '' }) => (
+  <div className={`rounded-3xl border border-white/5 bg-neutral-950/70 p-5 lg:p-6 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.9)] ${className}`}>
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">{title}</h3>
+      {action || null}
+    </div>
+    {children}
+  </div>
+);
+
 function ManagerDashboard({ jobs, users, currentUser, onRefresh, dashboardStats }) {
   const [selectedJob, setSelectedJob] = useState(null);
   const [jobDetails, setJobDetails] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [detailsError, setDetailsError] = useState('');
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [dateFilter, setDateFilter] = useState('today');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Auto-refresh every 30 seconds if enabled and no modal is open
   useEffect(() => {
-    if (!autoRefresh || selectedJob) return; // Pause when modal is open
-    const interval = setInterval(() => {
+    if (!autoRefresh || selectedJob) return undefined;
+    const intervalId = setInterval(() => {
       onRefresh?.();
     }, 30000);
-    return () => clearInterval(interval);
+    return () => clearInterval(intervalId);
   }, [autoRefresh, onRefresh, selectedJob]);
 
-  // Filter jobs based on date range using Eastern Time
   const filteredJobs = useMemo(() => {
+    if (!Array.isArray(jobs)) return [];
     return jobs.filter(job => {
-      // Check multiple possible date fields for comprehensive coverage
-      const possibleDates = [
-        job.date,
-        job.startTime,
-        job.startedAt,
-        job.createdAt,
-        job.timestamp,
-        job.completedAt
-      ].filter(d => d && DateUtils.isValidDate(d));
-      
-      if (possibleDates.length === 0) return dateFilter === 'all';
-      
-      // Use the most relevant date (prefer start times, then creation times)
-      const jobDate = job.startTime || job.startedAt || job.createdAt || 
-                     job.timestamp || job.date || possibleDates[0];
-      
-      switch (dateFilter) {
-        case 'today':
-          return DateUtils.isToday(jobDate);
-        case 'week':
-          return DateUtils.isThisWeek(jobDate);
-        case 'month':
-          return DateUtils.isThisMonth(jobDate);
-        case 'all':
-        default:
-          return true;
-      }
+      if (dateFilter === 'all') return true;
+      const candidate = job.startTime || job.startedAt || job.completedAt || job.date || job.createdAt || job.timestamp;
+      const jobDate = DateUtils.getValidDate(candidate);
+      if (!jobDate) return false;
+      if (dateFilter === 'today') return DateUtils.isToday(jobDate);
+      if (dateFilter === 'week') return DateUtils.isThisWeek(jobDate);
+      if (dateFilter === 'month') return DateUtils.isThisMonth(jobDate);
+      return true;
     });
   }, [jobs, dateFilter]);
 
-  // Open job details handler
-  const openJobDetails = async (job) => {
+  const activeJobs = useMemo(
+    () =>
+      filteredJobs.filter(job => {
+        const status = (job.status || '').toLowerCase();
+        return status === 'in progress' || status === 'in_progress' || status === 'pending';
+      }),
+    [filteredJobs]
+  );
+
+  const completedJobs = useMemo(
+    () =>
+      filteredJobs.filter(job => {
+        const status = (job.status || '').toLowerCase();
+        return status === 'completed';
+      }),
+    [filteredJobs]
+  );
+
+  const qcJobs = useMemo(
+    () =>
+      jobs.filter(job => {
+        const status = (job.status || '').toLowerCase();
+        return status === 'qc required' || status === 'qc_required';
+      }),
+    [jobs]
+  );
+
+  const overdueJobs = useMemo(() => {
+    return activeJobs.filter(job => {
+      const start = job.startTime || job.startedAt;
+      const startDate = DateUtils.getValidDate(start);
+      if (!startDate) return false;
+      const diffMinutes = (Date.now() - startDate.getTime()) / 60000;
+      return diffMinutes > 120;
+    });
+  }, [activeJobs]);
+
+  const onShiftCount = useMemo(() => {
+    const ids = new Set();
+    activeJobs.forEach(job => {
+      if (Array.isArray(job.assignedTechnicianIds)) {
+        job.assignedTechnicianIds.forEach(id => ids.add(id));
+      }
+      if (job.technicianId) ids.add(job.technicianId);
+      if (job.technicianName) ids.add(job.technicianName);
+    });
+    return ids.size;
+  }, [activeJobs]);
+
+  const detailerCount = useMemo(
+    () => Object.values(users || {}).filter(userRecord => userRecord?.role === 'detailer').length,
+    [users]
+  );
+
+  const todayCompletedCount = useMemo(() => {
+    if (typeof dashboardStats?.todayCompleted === 'number') {
+      return dashboardStats.todayCompleted;
+    }
+    const todayKey = new Date().toDateString();
+    return jobs.filter(job => job.completedAt && new Date(job.completedAt).toDateString() === todayKey).length;
+  }, [dashboardStats?.todayCompleted, jobs]);
+
+  const weekCompletedCount = useMemo(() => {
+    if (typeof dashboardStats?.weekCompleted === 'number') {
+      return dashboardStats.weekCompleted;
+    }
+    return jobs.filter(job => DateUtils.isThisWeek(job.completedAt)).length;
+  }, [dashboardStats?.weekCompleted, jobs]);
+
+  const averageTodayMinutes = useMemo(() => {
+    if (typeof dashboardStats?.averageTimeToday === 'number') {
+      return dashboardStats.averageTimeToday;
+    }
+    const todays = jobs.filter(job => job.startedAt && job.completedAt && DateUtils.isToday(job.completedAt));
+    if (!todays.length) return 0;
+    const total = todays.reduce((sum, job) => sum + DateUtils.calculateDuration(job.startedAt, job.completedAt), 0);
+    return Math.round(total / todays.length);
+  }, [dashboardStats?.averageTimeToday, jobs]);
+
+  const averageWeekMinutes = useMemo(() => {
+    if (typeof dashboardStats?.averageTimeWeek === 'number') {
+      return dashboardStats.averageTimeWeek;
+    }
+    const weeklies = jobs.filter(job => job.startedAt && job.completedAt && DateUtils.isThisWeek(job.completedAt));
+    if (!weeklies.length) return 0;
+    const total = weeklies.reduce((sum, job) => sum + DateUtils.calculateDuration(job.startedAt, job.completedAt), 0);
+    return Math.round(total / weeklies.length);
+  }, [dashboardStats?.averageTimeWeek, jobs]);
+
+  const efficiencyScore = useMemo(() => {
+    if (typeof dashboardStats?.efficiency === 'number') {
+      return dashboardStats.efficiency;
+    }
+    if (!weekCompletedCount) return 0;
+    const averagePerDay = weekCompletedCount / 7;
+    if (!averagePerDay) return 0;
+    return Math.round((todayCompletedCount / averagePerDay) * 100);
+  }, [dashboardStats?.efficiency, weekCompletedCount, todayCompletedCount]);
+
+  const performanceSeries = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date();
+      day.setDate(day.getDate() - (6 - index));
+      const label = day.toLocaleDateString('en-US', { weekday: 'short' });
+      const value = jobs.filter(job => {
+        if (!job.completedAt && !job.date) return false;
+        const compareDate = DateUtils.getValidDate(job.completedAt || job.date);
+        if (!compareDate) return false;
+        return compareDate.toDateString() === day.toDateString();
+      }).length;
+      return { label, value };
+    });
+  }, [jobs]);
+
+  const sparklineData = useMemo(() => performanceSeries.map(point => point.value), [performanceSeries]);
+
+  const teamDonutData = useMemo(() => {
+    const detailersList = Object.values(users || {}).filter(userRecord => userRecord?.role === 'detailer');
+    const distribution = detailersList
+      .map((detailer, index) => {
+        const totalJobs = jobs.filter(job => {
+          const status = (job.status || '').toLowerCase();
+          const isCountable = status === 'completed' || status === 'qc required' || status === 'qc_required';
+          if (!isCountable) return false;
+          return (
+            job.assignedTechnicianIds?.includes(detailer.id) ||
+            job.technicianId === detailer.id ||
+            job.technicianName === detailer.name
+          );
+        }).length;
+        return {
+          label: detailer.name || `Detailer ${index + 1}`,
+          value: totalJobs,
+          color: TEAM_DONUT_COLORS[index % TEAM_DONUT_COLORS.length]
+        };
+      })
+      .filter(entry => entry.value > 0);
+    if (distribution.length === 0) {
+      return [{ label: 'No data yet', value: 1, color: TEAM_DONUT_COLORS[0] }];
+    }
+    return distribution.slice(0, 6);
+  }, [jobs, users]);
+
+  const activePreview = useMemo(() => activeJobs.slice(0, 6), [activeJobs]);
+  const completedPreview = useMemo(() => completedJobs.slice(0, 6), [completedJobs]);
+  const qcPreview = useMemo(() => qcJobs.slice(0, 6), [qcJobs]);
+
+  const getStatusMeta = useCallback((status) => {
+    const normalized = (status || '').toLowerCase();
+    if (normalized === 'in progress' || normalized === 'in_progress') {
+      return { label: 'In Progress', className: 'border-sky-500/30 bg-sky-500/10 text-sky-300' };
+    }
+    if (normalized === 'completed') {
+      return { label: 'Completed', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' };
+    }
+    if (normalized === 'qc required' || normalized === 'qc_required') {
+      return { label: 'QC Required', className: 'border-amber-500/30 bg-amber-500/10 text-amber-300' };
+    }
+    return { label: status || 'Pending', className: 'border-slate-500/30 bg-slate-500/10 text-slate-300' };
+  }, []);
+
+  const openJobDetails = useCallback(async (job) => {
     setSelectedJob(job);
-    setLoading(true);
-    setError('');
-    setJobDetails(null);
+    setDetailsError('');
+    setDetailsLoading(true);
     try {
       const jobId = job.id || job._id;
-      if (!jobId) {
-        setError('Job ID not found');
-        return;
-      }
+      if (!jobId) throw new Error('Job ID not found');
       const res = await V2.get(`/jobs/${jobId}`);
-      if (res.data) {
-        setJobDetails(res.data);
-      } else {
-        setError('Job details not found');
-      }
+      setJobDetails(res.data || null);
     } catch (err) {
-      console.error('Job details error:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to load job details');
+      setDetailsError(err.response?.data?.error || err.message || 'Unable to load job details');
     } finally {
-      setLoading(false);
+      setDetailsLoading(false);
     }
-  };
+  }, []);
 
-  const closeJobDetails = () => {
+  const closeJobDetails = useCallback(() => {
     setSelectedJob(null);
     setJobDetails(null);
-    setError('');
-  };
-  // Calculate statistics with better validation - use provided dashboardStats or calculate locally
-  const stats = useMemo(() => {
-    if (dashboardStats) {
-      // Use the advanced stats from parent component
-      const detailers = Object.values(users || {}).filter(u => u.role === 'detailer');
-      return {
-        totalFiltered: filteredJobs.length,
-        totalToday: dashboardStats.todayCompleted,
-        active: dashboardStats.totalActive,
-        completed: dashboardStats.totalCompleted,
-        detailers: detailers.length,
-        weekCompleted: dashboardStats.weekCompleted,
-        averageTimeToday: dashboardStats.averageTimeToday,
-        averageTimeWeek: dashboardStats.averageTimeWeek,
-        efficiency: dashboardStats.efficiency,
-        qcRequired: dashboardStats.qcRequired
-      };
+    setDetailsError('');
+  }, []);
+
+  const performJobAction = useCallback(async (action) => {
+    const jobId = jobDetails?.job?.id || selectedJob?.id || selectedJob?._id;
+    if (!jobId) {
+      alert('Job ID not found');
+      return;
     }
-    
-    // Fallback to local calculation
-    const todayJobs = jobs.filter(job => {
-      const jobDate = job.date || job.startTime || job.createdAt || job.timestamp;
-      return DateUtils.isToday(jobDate);
-    });
-    
-    const activeJobs = filteredJobs.filter(j => j.status === 'In Progress');
-    const completedJobs = filteredJobs.filter(j => j.status === 'Completed');
-    const detailers = Object.values(users || {}).filter(u => u.role === 'detailer');
-    
-    return {
-      totalFiltered: filteredJobs.length,
-      totalToday: todayJobs.length,
-      active: activeJobs.length,
-      completed: completedJobs.length,
-      detailers: detailers.length
-    };
-  }, [filteredJobs, jobs, users, dashboardStats]);
+    try {
+      let message = '';
+      if (action === 'start') {
+        await V2.put(`/jobs/${jobId}/start`, { userId: currentUser?.id });
+        message = 'Timer started';
+      } else if (action === 'stop') {
+        await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id });
+        message = 'Timer stopped';
+      } else if (action === 'complete') {
+        await V2.put(`/jobs/${jobId}/complete`, { userId: currentUser?.id, completedAt: new Date().toISOString() });
+        message = 'Job marked complete';
+      } else if (action === 'qc') {
+        await V2.put(`/jobs/${jobId}/status`, { status: 'QC Required' });
+        message = 'Sent to QC';
+      }
+      await onRefresh?.();
+      closeJobDetails();
+      if (message) alert(message);
+    } catch (err) {
+      alert(err.response?.data?.error || err.message || 'Action failed');
+    }
+  }, [jobDetails?.job?.id, selectedJob, currentUser?.id, onRefresh, closeJobDetails]);
+
+  const metricCards = [
+    {
+      label: 'ACTIVE',
+      value: activeJobs.length,
+      subLabel: `${onShiftCount || 0} tech${onShiftCount === 1 ? '' : 's'} on shift`,
+      accent: 'blue'
+    },
+    {
+      label: 'COMPLETED TODAY',
+      value: todayCompletedCount,
+      subLabel: `Avg ${formatMinutesForDisplay(averageTodayMinutes)}`,
+      accent: 'green'
+    },
+    {
+      label: 'QC PENDING',
+      value: qcJobs.length,
+      subLabel: qcJobs.length ? 'Awaiting review' : 'All clear',
+      accent: 'amber'
+    },
+    {
+      label: 'WEEK COMPLETED',
+      value: weekCompletedCount,
+      subLabel: `${dashboardStats?.totalCompleted ?? completedJobs.length} total`,
+      accent: 'purple'
+    },
+    {
+      label: 'OVERDUE',
+      value: overdueJobs.length,
+      subLabel: overdueJobs.length ? 'Over 2h active' : 'No lag',
+      accent: 'red'
+    },
+    {
+      label: 'TEAM',
+      value: detailerCount,
+      subLabel: `${jobs.length} jobs in scope`,
+      accent: 'slate'
+    }
+  ];
+
+  const lastUpdated = DateUtils.formatDate(new Date(), { hour: '2-digit', minute: '2-digit' });
+  const timeframeOptions = [
+    { key: 'today', label: 'Today' },
+    { key: 'week', label: 'Week' },
+    { key: 'month', label: 'Month' },
+    { key: 'all', label: 'All' }
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Date Filter & Controls */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <h4 className="text-gray-900 font-medium">Dashboard View</h4>
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`px-2 py-1 text-xs rounded-lg transition-colors ${
-                autoRefresh
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              Auto-refresh: {autoRefresh ? 'ON' : 'OFF'}
-            </button>
-            <button
-              onClick={() => onRefresh?.()}
-              className="px-2 py-1 text-xs rounded-lg bg-gray-50 text-gray-700 hover:bg-gray-100"
-            >
-              🔄 Refresh
-            </button>
-          </div>
-          <div className="flex gap-2">
-            {[
-              { key: 'today', label: 'Today' },
-              { key: 'week', label: 'This Week' },
-              { key: 'month', label: 'This Month' },
-              { key: 'all', label: 'All Time' }
-            ].map(option => (
+    <div className="space-y-6 text-white">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-white">Operations Command</h2>
+          <p className="text-sm text-gray-500">
+            {filteredJobs.length} jobs in view • updated {lastUpdated}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1 rounded-full border border-gray-800 bg-black/40 p-1">
+            {timeframeOptions.map(option => (
               <button
                 key={option.key}
                 onClick={() => setDateFilter(option.key)}
-                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
                   dateFilter === option.key
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    ? 'border border-sky-500/40 bg-sky-500/20 text-sky-200'
+                    : 'text-gray-400 hover:text-white'
                 }`}
               >
                 {option.label}
               </button>
             ))}
           </div>
-        </div>
-        <div className="mt-2 flex justify-between items-center">
-          <span className="text-sm text-gray-600">
-            Showing {stats.totalFiltered} jobs for {dateFilter === 'all' ? 'all time' : dateFilter}
-          </span>
-          <span className="text-xs text-gray-500">
-            Last updated: {DateUtils.formatDate(new Date(), {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit'
-            })}
-          </span>
+          <button
+            onClick={() => setAutoRefresh(prev => !prev)}
+            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
+              autoRefresh
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                : 'border-gray-700 bg-black/50 text-gray-400 hover:text-white'
+            }`}
+          >
+            {autoRefresh ? 'Auto On' : 'Auto Off'}
+          </button>
+          <button
+            onClick={() => onRefresh?.()}
+            className="inline-flex items-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition-colors hover:border-sky-500 hover:bg-sky-500/20"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* 🚀 Premium Stats Grid with Advanced Analytics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Jobs"
-          value={stats.totalFiltered}
-          change={dateFilter === 'today' ? `${stats.totalToday || stats.totalFiltered} today` : undefined}
-          trend={stats.totalFiltered > (stats.totalToday || 0) ? 'up' : 'down'}
-          color="blue"
-          icon={
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-          }
-        />
-        
-        <StatCard
-          title="Active Jobs"
-          value={stats.active}
-          change={stats.active > 0 ? `${Math.round((stats.active / stats.totalFiltered) * 100)}% in progress` : 'No active jobs'}
-          trend={stats.active > 0 ? 'up' : 'down'}
-          color="yellow"
-          icon={
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          }
-        />
-        
-        <StatCard
-          title="Completed"
-          value={stats.completed}
-          change={stats.completed > 0 ? `${Math.round((stats.completed / stats.totalFiltered) * 100)}% complete` : 'None yet'}
-          trend={stats.completed > 0 ? 'up' : 'down'}
-          color="green"
-          icon={
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          }
-        />
-        
-        <StatCard
-          title="Team Members"
-          value={stats.detailers}
-          change={`${stats.detailers} active detailers`}
-          color="purple"
-          icon={
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-          }
-        />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+        {metricCards.map(card => (
+          <MetricCard key={card.label} {...card} />
+        ))}
       </div>
 
-      {/* 📊 Performance Analytics Dashboard */}
-      {stats.averageTimeToday && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <GlassCard className="p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Average Completion Time
-            </h3>
-            <div className="flex items-center justify-around">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-blue-600">{stats.averageTimeToday || 'N/A'}</div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Today</div>
-              </div>
-              {stats.averageTimeWeek && (
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-purple-600">{stats.averageTimeWeek}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">This Week</div>
-                </div>
-              )}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <SectionCard
+          title="PERFORMANCE TREND"
+          className="xl:col-span-2"
+          action={<span className="text-xs text-gray-500">Last 7 days</span>}
+        >
+          <PerformanceChart data={performanceSeries} height={220} color="#38bdf8" showGrid />
+          <div className="mt-4 grid grid-cols-2 gap-4 text-xs text-gray-500 lg:grid-cols-4">
+            <div>
+              Avg today
+              <span className="ml-1 text-white">{formatMinutesForDisplay(averageTodayMinutes)}</span>
             </div>
-          </GlassCard>
-
-          {stats.efficiency && (
-            <GlassCard className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
-                Team Efficiency
-              </h3>
-              <div className="flex items-center justify-center">
-                <ProgressRing 
-                  progress={stats.efficiency} 
-                  size={140} 
-                  color="#10b981"
-                  label="Efficiency"
-                />
-              </div>
-            </GlassCard>
-          )}
-        </div>
-      )}
-
-      {/* Active Jobs with Live Timers */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Jobs In Progress</h3>
-        <div className="space-y-4">
-          {filteredJobs.filter(job => job.status === 'In Progress' || job.status === 'in_progress').map(job => (
-            <button
-              key={job.id || job._id}
-              onClick={() => openJobDetails(job)}
-              className="w-full text-left bg-yellow-50 rounded-lg p-5 border border-yellow-200 hover:bg-yellow-100 transition-colors"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-3">
-                    <h4 className="text-gray-900 font-bold text-xl">
-                      {job.year} {job.make} {job.model}
-                    </h4>
-                    {job.vehicleColor && (
-                      <span className="px-2 py-1 bg-blue-50 text-blue-700 text-sm rounded-full font-medium border border-blue-200">
-                        {job.vehicleColor}
-                      </span>
-                    )}
-                    {job.priority && job.priority !== 'Normal' && (
-                      <span className={`px-2 py-1 rounded-full text-sm font-bold border ${
-                        job.priority === 'Urgent' ? 'bg-red-50 text-red-700 border-red-200' :
-                        job.priority === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                        job.priority === 'Low' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                        'bg-yellow-50 text-yellow-700 border-yellow-200'
-                      }`}>
-                        {job.priority}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                    <div>
-                      <span className="text-gray-600">Stock:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.stockNumber || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">VIN:</span>
-                      <span className="font-mono text-gray-900 text-xs ml-2">{job.vin?.slice(-8) || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Service:</span>
-                      <span className="text-blue-700 font-medium ml-2">{job.serviceType || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Detailer:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.technicianName || job.assignedTo || 'N/A'}</span>
-                    </div>
-                  </div>
-
-                  {job.salesPerson && (
-                    <div className="mb-3">
-                      <span className="text-gray-600 text-sm">Sales Person:</span>
-                      <span className="text-green-700 font-medium text-sm ml-2">{job.salesPerson}</span>
-                    </div>
-                  )}
-
-                  <div className="text-sm">
-                    <span className="text-gray-600">Started:</span>
-                    <span className="text-green-700 font-medium ml-2">
-                      {DateUtils.formatDateTime(job.startTime || job.startedAt)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right ml-4 min-w-[140px]">
-                  <span className="px-3 py-1 rounded-full text-sm font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">
-                    In Progress
-                  </span>
-                  {(job.startTime || job.startedAt) && (
-                    <div className="mt-3">
-                      <LiveTimer startTime={job.startTime || job.startedAt} className="text-yellow-700 font-mono text-xl font-bold" />
-                      <p className="text-gray-600 text-xs mt-1">Live Timer</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </button>
-          ))}
-          {filteredJobs.filter(job => job.status === 'In Progress' || job.status === 'in_progress').length === 0 && (
-            <p className="text-gray-600 text-center py-8">No jobs in progress</p>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Completed Jobs */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Recent Completed Jobs</h3>
-        <div className="space-y-4">
-          {filteredJobs.filter(job => job.status === 'Completed' || job.status === 'completed').slice(0, 10).map(job => (
-            <button
-              key={job.id || job._id}
-              onClick={() => openJobDetails(job)}
-              className="w-full text-left bg-gray-50 rounded-lg p-5 border border-gray-200 hover:bg-gray-100 transition-colors"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-3">
-                    <h4 className="text-gray-900 font-bold text-lg">
-                      {job.year} {job.make} {job.model}
-                    </h4>
-                    {job.vehicleColor && (
-                      <span className="px-2 py-1 bg-blue-50 text-blue-700 text-sm rounded-full font-medium border border-blue-200">
-                        {job.vehicleColor}
-                      </span>
-                    )}
-                    {job.priority && job.priority !== 'Normal' && (
-                      <span className={`px-2 py-1 rounded-full text-sm font-bold border ${
-                        job.priority === 'Urgent' ? 'bg-red-50 text-red-700 border-red-200' :
-                        job.priority === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                        job.priority === 'Low' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                        'bg-yellow-50 text-yellow-700 border-yellow-200'
-                      }`}>
-                        {job.priority}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                    <div>
-                      <span className="text-gray-600">Stock:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.stockNumber || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">VIN:</span>
-                      <span className="font-mono text-gray-900 text-xs ml-2">{job.vin?.slice(-8) || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Service:</span>
-                      <span className="text-blue-700 font-medium ml-2">{job.serviceType || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Detailer:</span>
-                      <span className="text-gray-900 font-medium ml-2">{job.technicianName || job.assignedTo || 'N/A'}</span>
-                    </div>
-                  </div>
-
-                  {job.salesPerson && (
-                    <div className="mb-3">
-                      <span className="text-gray-600 text-sm">Sales Person:</span>
-                      <span className="text-green-700 font-medium text-sm ml-2">{job.salesPerson}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-gray-600">Started:</span>
-                      <span className="text-green-700 font-medium ml-2">
-                        {DateUtils.formatDateTime(job.startTime || job.startedAt)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Completed:</span>
-                      <span className="text-green-700 font-medium ml-2">
-                        {DateUtils.formatDateTime(job.completedAt)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="text-right ml-4 min-w-[120px]">
-                  <span className="px-3 py-1 rounded-full text-sm font-bold bg-green-50 text-green-700 border border-green-200">
-                    Completed
-                  </span>
-                  {job.completedAt && (job.startTime || job.startedAt) && (
-                    <div className="mt-3">
-                      <p className="text-green-700 font-bold text-xl">
-                        {DateUtils.formatDuration(
-                          DateUtils.calculateDuration(
-                            job.startTime || job.startedAt, 
-                            job.completedAt
-                          )
-                        )}
-                      </p>
-                      <p className="text-gray-600 text-xs mt-1">Total Duration</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Compact Job Details Modal */}
-      {selectedJob && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-4 w-full max-w-5xl border border-gray-200 max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <h4 className="text-gray-900 font-bold text-lg">
-                  {selectedJob.year} {selectedJob.make} {selectedJob.model}
-                </h4>
-                <div className="flex gap-1.5 mt-1.5">
-                  {selectedJob.vehicleColor && (
-                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full font-medium border border-blue-200">
-                      {selectedJob.vehicleColor}
-                    </span>
-                  )}
-                  {selectedJob.priority && selectedJob.priority !== 'Normal' && (
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${
-                      selectedJob.priority === 'Urgent' ? 'bg-red-50 text-red-700 border-red-200' :
-                      selectedJob.priority === 'High' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                      selectedJob.priority === 'Low' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                      'bg-yellow-50 text-yellow-700 border-yellow-200'
-                    }`}>
-                      {selectedJob.priority}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button onClick={closeJobDetails} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            <div>
+              Avg week
+              <span className="ml-1 text-white">{formatMinutesForDisplay(averageWeekMinutes)}</span>
             </div>
+            <div>
+              Efficiency
+              <span className="ml-1 text-white">{efficiencyScore ? `${efficiencyScore}%` : '—'}</span>
+            </div>
+            <div>
+              Active vs Done
+              <span className="ml-1 text-white">{activeJobs.length}:{completedJobs.length}</span>
+            </div>
+          </div>
+        </SectionCard>
 
-            {loading && <p className="text-gray-600 text-center py-6 text-sm">Loading...</p>}
-            {error && <p className="text-red-700 text-center py-3 bg-red-50 rounded-lg border border-red-200 text-sm">{error}</p>}
-            
-            {jobDetails && (
-              <div className="space-y-6">
-                {/* Action Buttons */}
-                {jobDetails.job?.status !== 'completed' && (
-                  <div className="flex gap-3 mb-6">
-                    <button
-                      onClick={async () => { 
-                        try { 
-                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                          if (!jobId) return alert('Job ID not found');
-                          await V2.put(`/jobs/${jobId}/start`, { userId: currentUser?.id }); 
-                          await onRefresh?.(); 
-                          closeJobDetails(); 
-                          alert('Timer started');
-                        } catch (e) { 
-                          alert('Start failed: ' + (e.response?.data?.error || e.message)); 
-                        } 
-                      }}
-                      className="px-4 py-2 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
-                    >
-                      Start Timer
-                    </button>
-                    <button
-                      onClick={async () => { 
-                        try { 
-                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                          if (!jobId) return alert('Job ID not found');
-                          await V2.put(`/jobs/${jobId}/stop`, { userId: currentUser?.id }); 
-                          await onRefresh?.(); 
-                          closeJobDetails(); 
-                          alert('Timer stopped');
-                        } catch (e) { 
-                          alert('Stop failed: ' + (e.response?.data?.error || e.message)); 
-                        } 
-                      }}
-                      className="px-4 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-white text-sm"
-                    >
-                      Stop Timer
-                    </button>
-                    <button
-                      onClick={async () => { 
-                        try { 
-                          const jobId = jobDetails.job?.id || selectedJob?.id || selectedJob?._id;
-                          if (!jobId) return alert('Job ID not found');
-                          await V2.put(`/jobs/${jobId}/complete`, { 
-                            userId: currentUser?.id,
-                            completedAt: new Date().toISOString()
-                          }); 
-                          await onRefresh?.(); 
-                          closeJobDetails(); 
-                          alert('Job marked complete');
-                        } catch (e) { 
-                          alert('Complete failed: ' + (e.response?.data?.error || e.message)); 
-                        } 
-                      }}
-                      className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
-                    >
-                      Mark Complete
-                    </button>
-                  </div>
-                )}
+        <SectionCard
+          title="TEAM DISTRIBUTION"
+          action={<span className="text-xs text-gray-500">Top performers</span>}
+        >
+          <div className="flex flex-col items-center">
+            <DonutChart data={teamDonutData} size={200} centerText="Jobs" />
+            <div className="mt-4 w-full">
+              <Sparkline data={sparklineData} width={220} height={48} color="#a855f7" />
+              <p className="mt-2 text-xs text-gray-500">Completions per day</p>
+            </div>
+            <div className="mt-3 w-full space-y-1 text-xs text-gray-500">
+              {teamDonutData.slice(0, 3).map(entry => (
+                <div key={entry.label} className="flex items-center justify-between">
+                  <span>{entry.label}</span>
+                  <span className="text-white">{entry.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+      </div>
 
-                {/* Enhanced Details Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <h5 className="text-gray-900 font-medium mb-3 text-lg">Vehicle Details</h5>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Stock Number:</span>
-                        <span className="text-gray-900 font-medium">{jobDetails.job?.stockNumber || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">VIN:</span>
-                        <span className="text-gray-900 font-mono text-sm">{jobDetails.job?.vin || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Service Type:</span>
-                        <span className="text-blue-700 font-medium">{jobDetails.job?.serviceType || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Technician:</span>
-                        <span className="text-gray-900 font-medium">{selectedJob.technicianName || 'N/A'}</span>
-                      </div>
-                      {jobDetails.job?.salesPerson && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Sales Person:</span>
-                          <span className="text-green-700 font-medium">{jobDetails.job.salesPerson}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Priority:</span>
-                        <span className="text-gray-900 font-medium">{jobDetails.job?.priority || 'Normal'}</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <h5 className="text-gray-900 font-medium mb-3 text-lg">Timing & Status</h5>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Status:</span>
-                        <span className={`font-medium ${
-                          jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress'
-                            ? 'text-yellow-700' 
-                            : jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed'
-                            ? 'text-green-700'
-                            : 'text-gray-700'
-                        }`}>
-                          {jobDetails.job?.status === 'in_progress' ? 'In Progress' : 
-                           jobDetails.job?.status === 'completed' ? 'Completed' : 
-                           jobDetails.job?.status || 'Unknown'}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <SectionCard
+          title="ACTIVE JOBS"
+          action={<span className="text-xs text-gray-500">{activeJobs.length} total</span>}
+        >
+          <div className="space-y-3">
+            {activePreview.length ? (
+              activePreview.map(job => {
+                const meta = getStatusMeta(job.status);
+                return (
+                  <button
+                    key={job.id || job._id}
+                    onClick={() => openJobDetails(job)}
+                    className="group flex w-full items-center justify-between rounded-2xl border border-white/5 bg-black/40 px-4 py-3 text-left transition hover:border-sky-500/40 hover:bg-black/60"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+                        <span>
+                          {job.year} {job.make} {job.model}
+                        </span>
+                        {job.vehicleColor ? (
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-400">
+                            {job.vehicleColor}
+                          </span>
+                        ) : null}
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.28em] ${meta.className}`}>
+                          {meta.label}
                         </span>
                       </div>
-                      
-                      {jobDetails.job?.date && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Created:</span>
-                          <span className="text-gray-700">{DateUtils.formatDateTime(jobDetails.job.date)}</span>
-                        </div>
-                      )}
-                      
-                      {(jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Started:</span>
-                          <span className="text-green-700">{DateUtils.formatDateTime(jobDetails.job.startTime || jobDetails.job.startedAt)}</span>
-                        </div>
-                      )}
-                      
-                      {jobDetails.job?.completedAt && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Completed:</span>
-                          <span className="text-green-700">{DateUtils.formatDateTime(jobDetails.job.completedAt)}</span>
-                        </div>
-                      )}
-                      
-                      {/* Live Timer or Duration */}
-                      {(jobDetails.job?.status === 'In Progress' || jobDetails.job?.status === 'in_progress') && 
-                       (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
-                        <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-400/20">
-                          <p className="text-gray-400 text-sm mb-1">Current Duration:</p>
-                          <LiveTimer 
-                            startTime={jobDetails.job.startTime || jobDetails.job.startedAt} 
-                            className="text-yellow-300 font-mono text-2xl font-bold" 
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                        <span>
+                          Stock <span className="text-white">{job.stockNumber || 'N/A'}</span>
+                        </span>
+                        <span>
+                          VIN <span className="text-white font-mono">{job.vin?.slice(-8) || 'N/A'}</span>
+                        </span>
+                        <span>
+                          Service <span className="text-sky-300">{job.serviceType || 'N/A'}</span>
+                        </span>
+                        <span>
+                          Tech <span className="text-white">{job.technicianName || job.assignedTo || 'N/A'}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {job.startTime || job.startedAt ? (
+                        <>
+                          <LiveTimer
+                            startTime={job.startTime || job.startedAt}
+                            className="text-lg font-semibold text-sky-200"
                           />
-                        </div>
-                      )}
-                      
-                      {(jobDetails.job?.status === 'Completed' || jobDetails.job?.status === 'completed') && 
-                       jobDetails.job?.completedAt && (jobDetails.job?.startTime || jobDetails.job?.startedAt) && (
-                        <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-400/20">
-                          <p className="text-gray-400 text-sm mb-1">Total Duration:</p>
-                          <p className="text-green-300 font-mono text-2xl font-bold">
-                            {DateUtils.formatDuration(
-                              DateUtils.calculateDuration(
-                                jobDetails.job.startTime || jobDetails.job.startedAt, 
-                                jobDetails.job.completedAt
-                              )
-                            )}
-                          </p>
-                        </div>
+                          <p className="text-[11px] uppercase tracking-wide text-sky-500">Live</p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-gray-500">Awaiting start</p>
                       )}
                     </div>
-                  </div>
-                </div>
-
-                {/* Timeline Section */}
-                <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                  <h5 className="text-white font-medium mb-3 text-lg">Job Timeline</h5>
-                  <div className="max-h-48 overflow-y-auto pr-2">
-                    {(jobDetails.events || []).filter(ev => ev && ev.type).length > 0 ? (
-                      <ul className="space-y-2">
-                        {jobDetails.events.filter(ev => ev && ev.type).map((ev, idx) => (
-                          <li key={idx} className="flex justify-between items-center py-2 border-b border-white/10 last:border-b-0">
-                            <div>
-                              <span className="text-white font-medium">{ev.type}</span>
-                              {ev.userName && <span className="text-gray-400 text-sm ml-2">by {ev.userName}</span>}
-                            </div>
-                            <span className="text-gray-400 text-sm">
-                              {DateUtils.formatDateTime(ev.timestamp) || 'Unknown time'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-gray-400 text-center py-4">No timeline events recorded</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Notes Section */}
-                {jobDetails.job?.notes && (
-                  <div className="bg-white rounded-lg p-4 border border-gray-200">
-                    <h5 className="text-gray-900 font-medium mb-3">Notes</h5>
-                    <p className="text-gray-700">{jobDetails.job.notes}</p>
-                  </div>
-                )}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-2xl border border-white/5 bg-black/40 px-4 py-6 text-center text-sm text-gray-500">
+                No active jobs right now
               </div>
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="RECENT COMPLETIONS"
+          action={<span className="text-xs text-gray-500">{completedJobs.length} in range</span>}
+        >
+          <div className="space-y-3">
+            {completedPreview.length ? (
+              completedPreview.map(job => {
+                const meta = getStatusMeta(job.status);
+                const duration = job.completedAt && (job.startTime || job.startedAt)
+                  ? formatMinutesForDisplay(
+                      DateUtils.calculateDuration(job.startTime || job.startedAt, job.completedAt)
+                    )
+                  : '—';
+                return (
+                  <button
+                    key={job.id || job._id}
+                    onClick={() => openJobDetails(job)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-left transition hover:border-emerald-500/40 hover:bg-black/50"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+                        {job.year} {job.make} {job.model}
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.28em] ${meta.className}`}>
+                          {meta.label}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                        <span>
+                          Stock <span className="text-white">{job.stockNumber || 'N/A'}</span>
+                        </span>
+                        <span>
+                          Service <span className="text-emerald-300">{job.serviceType || 'N/A'}</span>
+                        </span>
+                        <span>
+                          Completed <span className="text-white">{DateUtils.formatDateTime(job.completedAt)}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-semibold text-emerald-200">{duration}</p>
+                      <p className="text-[11px] uppercase tracking-wide text-emerald-500">Cycle time</p>
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-2xl border border-white/5 bg-black/40 px-4 py-6 text-center text-sm text-gray-500">
+                No completions in this window
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      </div>
+
+      <SectionCard
+        title="QUALITY CONTROL"
+        action={
+          <span className={`text-xs font-semibold uppercase tracking-wide ${qcJobs.length ? 'text-amber-300' : 'text-gray-500'}`}>
+            {qcJobs.length ? `${qcJobs.length} waiting` : 'All clear'}
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          {qcPreview.length ? (
+            qcPreview.map(job => {
+              const meta = getStatusMeta(job.status);
+              return (
+                <button
+                  key={job.id || job._id}
+                  onClick={() => openJobDetails(job)}
+                  className="flex w-full items-center justify-between rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-left transition hover:border-amber-500/40 hover:bg-black/50"
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+                      {job.year} {job.make} {job.model}
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.28em] ${meta.className}`}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                      <span>
+                        Stock <span className="text-white">{job.stockNumber || 'N/A'}</span>
+                      </span>
+                      <span>
+                        Tech <span className="text-white">{job.technicianName || 'N/A'}</span>
+                      </span>
+                      <span>
+                        Completed <span className="text-white">{DateUtils.formatDateTime(job.completedAt)}</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
+                      Review
+                    </span>
+                  </div>
+                </button>
+              );
+            })
+          ) : (
+            <div className="rounded-2xl border border-white/5 bg-black/40 px-4 py-6 text-center text-sm text-gray-500">
+              No jobs awaiting QC
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
+      {selectedJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur">
+          <div className="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-white/5 bg-neutral-950 p-6 shadow-[0_40px_80px_-20px_rgba(15,23,42,0.9)]">
+            <button
+              onClick={closeJobDetails}
+              className="absolute right-4 top-4 rounded-full border border-white/10 bg-black/40 p-2 text-gray-400 transition hover:text-white"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="pr-8">
+              <p className="text-[11px] uppercase tracking-[0.32em] text-gray-500">Job Overview</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">
+                {selectedJob.year} {selectedJob.make} {selectedJob.model}
+              </h2>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+                <span>Stock <span className="text-white">{selectedJob.stockNumber || 'N/A'}</span></span>
+                <span>VIN <span className="text-white font-mono">{selectedJob.vin || 'N/A'}</span></span>
+                <span>Service <span className="text-sky-300">{selectedJob.serviceType || 'N/A'}</span></span>
+                <span>Tech <span className="text-white">{selectedJob.technicianName || 'N/A'}</span></span>
+              </div>
+            </div>
+
+            {detailsLoading ? (
+              <div className="py-16 text-center text-sm text-gray-500">Loading details…</div>
+            ) : (
+              <>
+                {detailsError ? (
+                  <div className="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
+                    {detailsError}
+                  </div>
+                ) : null}
+
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-white/5 bg-black/30 p-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-gray-500">Vehicle</h3>
+                    <dl className="mt-3 space-y-2 text-sm text-gray-400">
+                      <div className="flex justify-between">
+                        <dt>Stock</dt>
+                        <dd className="text-white">{jobDetails?.job?.stockNumber || 'N/A'}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>VIN</dt>
+                        <dd className="text-white font-mono text-xs">{jobDetails?.job?.vin || 'N/A'}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Service</dt>
+                        <dd className="text-sky-300">{jobDetails?.job?.serviceType || 'N/A'}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Sales</dt>
+                        <dd className="text-emerald-300">{jobDetails?.job?.salesPerson || '—'}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Priority</dt>
+                        <dd className="text-white">{jobDetails?.job?.priority || 'Normal'}</dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/5 bg-black/30 p-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-gray-500">Timing</h3>
+                    <dl className="mt-3 space-y-2 text-sm text-gray-400">
+                      <div className="flex items-center justify-between">
+                        <dt>Status</dt>
+                        <dd>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.28em] ${getStatusMeta(jobDetails?.job?.status).className}`}>
+                            {getStatusMeta(jobDetails?.job?.status).label}
+                          </span>
+                        </dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Created</dt>
+                        <dd className="text-white">{DateUtils.formatDateTime(jobDetails?.job?.date)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Started</dt>
+                        <dd className="text-white">{DateUtils.formatDateTime(jobDetails?.job?.startTime || jobDetails?.job?.startedAt)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Completed</dt>
+                        <dd className="text-white">{DateUtils.formatDateTime(jobDetails?.job?.completedAt)}</dd>
+                      </div>
+                    </dl>
+                    {jobDetails?.job?.status && (jobDetails.job.status === 'In Progress' || jobDetails.job.status === 'in_progress') && (jobDetails.job.startTime || jobDetails.job.startedAt) ? (
+                      <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-[0.32em] text-amber-200">Live timer</p>
+                        <LiveTimer
+                          startTime={jobDetails.job.startTime || jobDetails.job.startedAt}
+                          className="text-2xl font-semibold text-amber-100"
+                        />
+                      </div>
+                    ) : null}
+                    {jobDetails?.job?.status && jobDetails.job.status.toLowerCase() === 'completed' && jobDetails.job.completedAt && (jobDetails.job.startTime || jobDetails.job.startedAt) ? (
+                      <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
+                        <p className="text-[11px] uppercase tracking-[0.32em] text-emerald-200">Total time</p>
+                        <p className="text-2xl font-semibold text-emerald-100">
+                          {formatMinutesForDisplay(
+                            DateUtils.calculateDuration(jobDetails.job.startTime || jobDetails.job.startedAt, jobDetails.job.completedAt)
+                          )}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="mt-4 max-h-48 overflow-y-auto rounded-2xl border border-white/5 bg-black/30 p-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.32em] text-gray-500">Timeline</h3>
+                  <ul className="mt-3 space-y-2 text-sm text-gray-400">
+                    {(jobDetails?.events || []).filter(eventItem => eventItem?.type).map((eventItem, index) => (
+                      <li key={`${eventItem.type}-${index}`} className="flex items-center justify-between gap-4">
+                        <div>
+                          <span className="text-white">{eventItem.type}</span>
+                          {eventItem.userName ? (
+                            <span className="ml-2 text-xs text-gray-500">{eventItem.userName}</span>
+                          ) : null}
+                        </div>
+                        <span className="text-xs text-gray-500">{DateUtils.formatDateTime(eventItem.timestamp)}</span>
+                      </li>
+                    ))}
+                    {(jobDetails?.events || []).filter(eventItem => eventItem?.type).length === 0 ? (
+                      <li className="py-4 text-center text-sm text-gray-500">No timeline entries yet</li>
+                    ) : null}
+                  </ul>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => performJobAction('start')}
+                    className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:border-emerald-500 hover:bg-emerald-500/20"
+                  >
+                    Start Timer
+                  </button>
+                  <button
+                    onClick={() => performJobAction('stop')}
+                    className="rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-500 hover:bg-amber-500/20"
+                  >
+                    Stop Timer
+                  </button>
+                  <button
+                    onClick={() => performJobAction('complete')}
+                    className="rounded-full border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 transition hover:border-sky-500 hover:bg-sky-500/20"
+                  >
+                    Mark Complete
+                  </button>
+                  <button
+                    onClick={() => performJobAction('qc')}
+                    className="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-4 py-2 text-sm font-semibold text-fuchsia-200 transition hover:border-fuchsia-500 hover:bg-fuchsia-500/20"
+                  >
+                    Send to QC
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -3621,6 +4391,13 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
+  // 🔍 Enterprise Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocus, setSearchFocus] = useState(false);
+  // Sub-tabs and compact view
+  const [tab, setTab] = useState('active'); // 'active' | 'completed' | 'qc' | 'all'
+  const [compact, setCompact] = useState(false);
+  
   // Filter states
   const [filters, setFilters] = useState({
     startDate: '',
@@ -3631,6 +4408,23 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
     status: ''
   });
 
+  // 🎯 Keyboard Shortcuts for Search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder*="Search jobs"]');
+        if (searchInput) {
+          searchInput.focus();
+          setSearchFocus(true);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Get unique values for filter options
   const filterOptions = useMemo(() => {
     const serviceTypes = [...new Set(jobs.map(j => j.serviceType).filter(Boolean))];
@@ -3640,9 +4434,38 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
     return { serviceTypes, detailers, statuses };
   }, [jobs, users]);
 
-  // Filter jobs based on current filter settings
+  // 🚀 Enterprise Filter & Search Logic
   const filteredJobs = useMemo(() => {
-    return jobs.filter(job => {
+    let filtered = jobs.filter(job => {
+      // 🔍 Intelligent Search - searches across multiple fields
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const searchableFields = [
+          job.vin,
+          job.stockNumber,
+          job.vehicleDescription,
+          job.make,
+          job.model,
+          job.year?.toString(),
+          job.color,
+          job.serviceType,
+          job.technicianName,
+          job.salesPerson,
+          job.status
+        ].filter(Boolean).join(' ').toLowerCase();
+        
+        // Fuzzy search - allows partial matches
+        if (!searchableFields.includes(query)) {
+          // Check if query matches any word in the searchable fields
+          const queryWords = query.split(' ');
+          const matches = queryWords.some(word => 
+            searchableFields.includes(word) || 
+            searchableFields.split(' ').some(field => field.startsWith(word))
+          );
+          if (!matches) return false;
+        }
+      }
+      
       // Date filter
       if (filters.startDate) {
         const jobDate = new Date(job.date);
@@ -3674,7 +4497,17 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
       
       return true;
     });
-  }, [jobs, filters]);
+    // Apply tab filter
+    if (tab === 'active') {
+      filtered = filtered.filter(j => (j.status === 'In Progress' || j.status === 'in_progress' || j.status === 'Pending'));
+    } else if (tab === 'completed') {
+      filtered = filtered.filter(j => (j.status === 'Completed' || j.status === 'completed'));
+    } else if (tab === 'qc') {
+      filtered = filtered.filter(j => (j.status === 'QC Required' || j.status === 'qc_required'));
+    }
+
+    return filtered;
+  }, [jobs, filters, searchQuery, tab]);
 
   const clearFilters = () => {
     setFilters({
@@ -3720,35 +4553,138 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
 
   return (
     <div className="space-y-6">
-      {/* Compact Filters */}
-      <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="w-36">
-            <label className="block text-gray-700 text-xs font-medium mb-1">Start Date</label>
+      {/* 🔍 Search + Controls Header (Dark X.com style) */}
+      <div className="bg-black rounded-3xl p-6 border border-gray-800 shadow-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-gray-900 rounded-2xl flex items-center justify-center border border-gray-800">
+              <svg className="w-5 h-5 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-white">Job Management</h2>
+              <p className="text-gray-400 font-medium">
+                {filteredJobs.length} of {jobs.length} jobs
+                {searchQuery && ` matching "${searchQuery}"`}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onRefresh}
+            className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-gray-200 rounded-xl font-medium transition-all duration-200 border border-gray-700"
+          >
+            <svg className="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        </div>
+        
+        {/* 🚀 Intelligent Search Bar */}
+        <div className="relative">
+          <div className={`relative transition-all duration-200 ${searchFocus ? 'scale-[1.02]' : ''}`}>
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <svg className={`w-5 h-5 transition-colors duration-200 ${searchFocus ? 'text-white' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocus(true)}
+              onBlur={() => setSearchFocus(false)}
+              placeholder="Search jobs by VIN, stock number, vehicle, technician, or status..."
+              className="w-full pl-12 pr-20 py-3 bg-black border border-gray-700 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-gray-500 transition-all duration-200 text-base"
+            />
+            <div className="absolute inset-y-0 right-0 pr-4 flex items-center gap-2">
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="p-1 text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+              <kbd className="px-2 py-1 bg-gray-900 text-gray-300 rounded-lg font-mono text-xs border border-gray-700">⌘F</kbd>
+            </div>
+          </div>
+          
+          {/* Search Results Counter */}
+          {searchQuery && (
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <span className="text-gray-400 font-medium">
+                {filteredJobs.length} result{filteredJobs.length !== 1 ? 's' : ''} found
+              </span>
+              {filteredJobs.length === 0 && (
+                <span className="text-amber-400 font-medium flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  Try a different search term
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Sub-tabs and view toggle */}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-full p-1">
+              {['active','completed','qc','all'].map(key => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
+                    tab === key ? 'bg-black text-black' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  {key === 'qc' ? 'QC' : key}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCompact(v => !v)}
+              className={`px-3 py-1.5 rounded-xl text-sm font-medium border ${compact ? 'bg-gray-800 text-white border-gray-700' : 'bg-gray-900 text-gray-300 border-gray-800'} hover:bg-gray-800`}
+              title="Toggle compact table view"
+            >
+              {compact ? 'Card View' : 'Table View'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Advanced Filters */}
+      <div className="bg-black border border-gray-800 rounded-2xl p-3 sm:p-4 shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Start</label>
             <input
               type="date"
               value={filters.startDate}
               onChange={e => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             />
           </div>
-          
-          <div className="w-36">
-            <label className="block text-gray-700 text-xs font-medium mb-1">End Date</label>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">End</label>
             <input
               type="date"
               value={filters.endDate}
               onChange={e => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             />
           </div>
-          
-          <div className="w-40">
-            <label className="block text-gray-700 text-xs font-medium mb-1">Service Type</label>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Service</label>
             <select
               value={filters.serviceType}
               onChange={e => setFilters(prev => ({ ...prev, serviceType: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             >
               <option value="">All Types</option>
               {filterOptions.serviceTypes.map(type => (
@@ -3756,26 +4692,26 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
               ))}
             </select>
           </div>
-          
-          <div className="w-32">
-            <label className="block text-gray-700 text-xs font-medium mb-1">Vehicle</label>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Vehicle</label>
             <select
               value={filters.vehicleType}
               onChange={e => setFilters(prev => ({ ...prev, vehicleType: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             >
               <option value="">All</option>
               <option value="new">New</option>
               <option value="used">Used</option>
             </select>
           </div>
-          
-          <div className="w-40">
-            <label className="block text-gray-700 text-xs font-medium mb-1">Detailer</label>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Detailer</label>
             <select
               value={filters.detailer}
               onChange={e => setFilters(prev => ({ ...prev, detailer: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             >
               <option value="">All</option>
               {filterOptions.detailers.map(detailer => (
@@ -3783,12 +4719,13 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
               ))}
             </select>
           </div>
-          
-          <div className="w-32\">\n            <label className="block text-gray-700 text-xs font-medium mb-1">Status</label>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Status</label>
             <select
               value={filters.status}
               onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
-              className="w-full bg-white text-gray-900 text-sm border border-gray-300 rounded py-1.5 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white text-xs border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600"
             >
               <option value="">All</option>
               {filterOptions.statuses.map(status => (
@@ -3796,93 +4733,97 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
               ))}
             </select>
           </div>
-          
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">
+            Showing {filteredJobs.length} of {jobs.length} jobs
+          </span>
           <button
             onClick={clearFilters}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-300 bg-gray-950 border border-gray-800 rounded-full hover:bg-gray-900 transition-colors"
           >
-            Clear
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Clear Filters
           </button>
-        </div>
-        
-        <div className="mt-3 text-sm text-gray-700 font-medium">
-          Showing {filteredJobs.length} of {jobs.length} jobs
         </div>
       </div>
 
       {/* Jobs List */}
-      <div className="bg-white rounded-xl p-4 md:p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-bold text-lg mb-3">All Jobs</h3>
-        <div className="job-list-container space-y-2 max-h-[600px] overflow-y-auto">
-          {filteredJobs.length > 0 ? filteredJobs.map(job => (
+      {!compact ? (
+        <div className="bg-black rounded-xl p-3 border border-gray-800">
+          <h3 className="text-white font-semibold text-base mb-2">All Jobs</h3>
+          <div className="job-list-container space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
+            {filteredJobs.length > 0 ? filteredJobs.map(job => (
             <div
               key={job.id || job._id}
-              className="job-card bg-gray-50 rounded-lg p-3 md:p-2.5 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 transition-all cursor-pointer hover:shadow-md"
+              className="job-card bg-black rounded-lg p-2.5 border border-gray-800 hover:bg-gray-900/50 hover:border-gray-700 transition-all cursor-pointer"
               onClick={() => openDetails(job)}
             >
               {/* Main Job Header */}
-              <div className="flex justify-between items-start mb-2 gap-2">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <h4 className="text-gray-900 font-bold text-base leading-tight">
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                    <h4 className="text-white font-semibold text-sm leading-tight">
                       {job.year} {job.make} {job.model}
                     </h4>
                     {job.vehicleColor && (
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full font-semibold border border-blue-300">
+                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-xs rounded-full font-medium border border-blue-500/30">
                         {job.vehicleColor}
                       </span>
                     )}
                     {job.priority && job.priority !== 'Normal' && (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${
-                        job.priority === 'Urgent' ? 'priority-urgent' :
-                        job.priority === 'High' ? 'priority-high' :
-                        job.priority === 'Low' ? 'priority-low' :
-                        'priority-normal'
+                      <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium border ${
+                        job.priority === 'Urgent' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                        job.priority === 'High' ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' :
+                        job.priority === 'Low' ? 'bg-gray-500/10 text-gray-400 border-gray-500/30' :
+                        'bg-gray-500/10 text-gray-400 border-gray-500/30'
                       }`}>
                         {job.priority}
                       </span>
                     )}
                   </div>
                   
-                  <div className="job-info-grid grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-2 text-xs mb-2">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs mb-1">
                     <div>
-                      <span className="text-gray-600 font-medium">Stock:</span>
-                      <span className="text-gray-900 font-bold ml-1">{job.stockNumber || 'N/A'}</span>
+                      <span className="text-gray-500">Stock:</span>
+                      <span className="text-white ml-1">{job.stockNumber || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600 font-medium">VIN:</span>
-                      <span className="font-mono text-gray-900 font-bold text-xs ml-1">{job.vin?.slice(-8) || 'N/A'}</span>
+                      <span className="text-gray-500">VIN:</span>
+                      <span className="font-mono text-white text-xs ml-1">{job.vin?.slice(-8) || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600 font-medium">Service:</span>
-                      <span className="text-blue-700 font-bold ml-1">{job.serviceType || 'N/A'}</span>
+                      <span className="text-gray-500">Service:</span>
+                      <span className="text-blue-400 ml-1">{job.serviceType || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600 font-medium">Detailer:</span>
-                      <span className="text-gray-900 font-bold ml-1">{job.technicianName || job.assignedTo || 'N/A'}</span>
+                      <span className="text-gray-500">Detailer:</span>
+                      <span className="text-white ml-1">{job.technicianName || job.assignedTo || 'N/A'}</span>
                     </div>
+                    {job.salesPerson && (
+                      <div>
+                        <span className="text-gray-500">Sales:</span>
+                        <span className="text-green-400 ml-1">{job.salesPerson}</span>
+                      </div>
+                    )}
                   </div>
 
-                  {job.salesPerson && (
-                    <div className="mb-2">
-                      <span className="text-gray-600 text-xs font-medium">Sales:</span>
-                      <span className="text-green-700 font-bold text-xs ml-1">{job.salesPerson}</span>
-                    </div>
-                  )}
-
                   {/* Timing Information */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  <div className="flex flex-wrap gap-x-3 text-xs">
                     {job.startTime || job.startedAt ? (
                       <div>
-                        <span className="text-gray-600">Started:</span>
-                        <span className="text-green-700 font-medium ml-2">
+                        <span className="text-gray-500">Started:</span>
+                        <span className="text-green-400 ml-1">
                           {DateUtils.formatDateTime(job.startTime || job.startedAt)}
                         </span>
                       </div>
                     ) : (
                       <div>
-                        <span className="text-gray-600">Created:</span>
-                        <span className="text-gray-700 ml-2">
+                        <span className="text-gray-500">Created:</span>
+                        <span className="text-gray-400 ml-1">
                           {DateUtils.formatDateTime(job.date || job.createdAt)}
                         </span>
                       </div>
@@ -3890,8 +4831,8 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                     
                     {job.completedAt && (
                       <div>
-                        <span className="text-gray-600">Completed:</span>
-                        <span className="text-green-700 font-medium ml-2">
+                        <span className="text-gray-500">Completed:</span>
+                        <span className="text-green-400 ml-1">
                           {DateUtils.formatDateTime(job.completedAt)}
                         </span>
                       </div>
@@ -3900,17 +4841,17 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                 </div>
 
                 {/* Status and Duration */}
-                <div className="text-right ml-2 min-w-[100px]">
-                  <div className={`status-badge px-2 md:px-3 py-1 rounded-full text-xs font-bold border mb-2 ${
+                <div className="text-right ml-2 flex-shrink-0">
+                  <div className={`status-badge px-2 py-0.5 rounded-full text-xs font-medium border inline-block ${
                     job.status === 'In Progress' || job.status === 'in_progress'
-                      ? 'status-in-progress' 
+                      ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' 
                       : job.status === 'Completed' || job.status === 'completed'
-                      ? 'status-completed'
+                      ? 'bg-green-500/10 text-green-400 border-green-500/30'
                       : job.status === 'QC Required'
-                      ? 'status-qc-required'
+                      ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
                       : job.status === 'Failed QC'
-                      ? 'status-failed-qc'
-                      : 'status-pending'
+                      ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                      : 'bg-gray-500/10 text-gray-400 border-gray-500/30'
                   }`}>
                     {job.status === 'in_progress' ? 'In Progress' : 
                      job.status === 'completed' ? 'Completed' : 
@@ -3918,15 +4859,15 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                   </div>
                   
                   {(job.status === 'In Progress' || job.status === 'in_progress') && job.startTime && (
-                    <div className="mt-2">
-                      <LiveTimer startTime={job.startTime} className="text-yellow-300 font-mono text-xl font-bold" />
-                      <p className="text-gray-400 text-xs mt-1">Live Timer</p>
+                    <div className="mt-1.5">
+                      <LiveTimer startTime={job.startTime} className="text-yellow-400 font-mono text-base font-semibold" />
+                      <p className="text-gray-500 text-xs mt-0.5">Live</p>
                     </div>
                   )}
                   
                   {(job.status === 'Completed' || job.status === 'completed') && job.completedAt && (job.startTime || job.startedAt) && (
-                    <div className="mt-2">
-                      <p className="text-green-300 font-bold text-xl">
+                    <div className="mt-1.5">
+                      <p className="text-green-400 font-semibold text-base">
                         {DateUtils.formatDuration(
                           DateUtils.calculateDuration(
                             job.startTime || job.startedAt, 
@@ -3934,7 +4875,7 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                           )
                         )}
                       </p>
-                      <p className="text-gray-400 text-xs mt-1">Total Duration</p>
+                      <p className="text-gray-500 text-xs mt-0.5">Duration</p>
                     </div>
                   )}
                 </div>
@@ -3942,7 +4883,7 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
             </div>
           )) : (
             <div className="text-center py-12">
-              <p className="text-gray-400 text-lg">No jobs found matching your filters</p>
+              <p className="text-gray-400">No jobs found matching your filters</p>
               <button
                 onClick={clearFilters}
                 className="mt-4 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg border border-blue-400/30 transition-colors"
@@ -3951,16 +4892,66 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
               </button>
             </div>
           )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-black rounded-xl p-3 border border-gray-800">
+          <div className="overflow-x-auto max-h-[calc(100vh-300px)] overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-black">
+                <tr className="text-gray-400 border-b border-gray-800">
+                  <th className="text-left py-1.5 px-2 font-medium">Vehicle</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Stock</th>
+                  <th className="text-left py-1.5 px-2 font-medium">VIN</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Service</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Detailer</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Status</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Started</th>
+                  <th className="text-left py-1.5 px-2 font-medium">Completed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.length > 0 ? filteredJobs.map(job => (
+                  <tr key={job.id || job._id} className="border-b border-gray-800/50 hover:bg-gray-900/50 cursor-pointer transition-colors" onClick={() => openDetails(job)}>
+                    <td className="py-1.5 px-2 text-white text-xs font-medium">{job.year} {job.make} {job.model}</td>
+                    <td className="py-1.5 px-2 text-gray-400 text-xs">{job.stockNumber || 'N/A'}</td>
+                    <td className="py-1.5 px-2 text-gray-400 font-mono text-xs">{job.vin?.slice(-8) || 'N/A'}</td>
+                    <td className="py-1.5 px-2 text-gray-300 text-xs">{job.serviceType || 'N/A'}</td>
+                    <td className="py-1.5 px-2 text-gray-300 text-xs">{job.technicianName || job.assignedTo || 'N/A'}</td>
+                    <td className="py-1.5 px-2">
+                      <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium border ${
+                        job.status === 'In Progress' || job.status === 'in_progress'
+                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' 
+                          : job.status === 'Completed' || job.status === 'completed'
+                          ? 'bg-green-500/10 text-green-400 border-green-500/30'
+                          : job.status === 'QC Required' || job.status === 'qc_required'
+                          ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+                          : 'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                      }`}>
+                        {job.status === 'in_progress' ? 'In Progress' : job.status === 'completed' ? 'Completed' : job.status || 'Pending'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-gray-400 text-xs">{(job.startTime || job.startedAt) ? DateUtils.formatDateTime(job.startTime || job.startedAt) : '-'}</td>
+                    <td className="py-1.5 px-2 text-gray-400 text-xs">{job.completedAt ? DateUtils.formatDateTime(job.completedAt) : '-'}</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="py-6 px-2 text-center text-gray-400" colSpan="8">No jobs found matching your filters</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Compact Job Details Modal */}
       {selectedJob && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-4 w-full max-w-5xl border border-gray-200 max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-black rounded-xl p-4 w-full max-w-5xl border border-gray-800 max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <h4 className="text-gray-900 font-bold text-lg">
+                <h4 className="text-white font-bold">
                   {selectedJob.year} {selectedJob.make} {selectedJob.model}
                 </h4>
                 {selectedJob.vehicleColor && (
@@ -3978,20 +4969,20 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
               <div className="space-y-4">
                 {/* Compact 3-Column Details Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Vehicle Info</h5>
+                  <div className="bg-black rounded-lg p-3 border border-gray-800">
+                    <h5 className="text-white font-semibold mb-2 text-sm">Vehicle Info</h5>
                     <div className="space-y-1.5 text-xs">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Vehicle:</span>
-                        <span className="text-gray-900 font-medium text-right">{selectedJob.vehicleDescription || 'N/A'}</span>
+                        <span className="text-white font-medium text-right">{selectedJob.vehicleDescription || 'N/A'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Stock:</span>
-                        <span className="text-gray-900 font-medium">{jobDetails.job?.stockNumber || 'N/A'}</span>
+                        <span className="text-white font-medium">{jobDetails.job?.stockNumber || 'N/A'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">VIN:</span>
-                        <span className="text-gray-900 font-mono text-xs">{jobDetails.job?.vin?.slice(0,10) || 'N/A'}...</span>
+                        <span className="text-white font-mono text-xs">{jobDetails.job?.vin?.slice(0,10) || 'N/A'}...</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Service:</span>
@@ -4006,8 +4997,8 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                     </div>
                   </div>
                   
-                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Timing & Status</h5>
+                  <div className="bg-black rounded-lg p-3 border border-gray-800">
+                    <h5 className="text-white font-semibold mb-2 text-sm">Timing & Status</h5>
                     <div className="space-y-1.5 text-xs">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Status:</span>
@@ -4074,15 +5065,15 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
                     </div>
                   </div>
                   
-                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    <h5 className="text-gray-900 font-semibold mb-2 text-sm">Team & Activity</h5>
+                  <div className="bg-black rounded-lg p-3 border border-gray-800">
+                    <h5 className="text-white font-semibold mb-2 text-sm">Team & Activity</h5>
                     <div className="space-y-2 text-xs">
                       {(jobDetails.technicians || []).length > 0 && (
                         <div>
                           <p className="text-gray-600 mb-1">Technicians:</p>
                           <div className="space-y-0.5">
                             {(jobDetails.technicians || []).map(t => (
-                              <p key={t.userId} className="text-gray-900 font-medium">• {t.userName || t.name || t.userId}</p>
+                              <p key={t.userId} className="text-white font-medium">• {t.userName || t.name || t.userId}</p>
                             ))}
                           </div>
                         </div>
@@ -4173,137 +5164,6 @@ function JobsView({ jobs, users, currentUser, onRefresh }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// Users View Component
-function UsersView({ users, detailers, onDeleteUser }) {
-  const [newUser, setNewUser] = useState({ name: '', pin: '', role: 'detailer', phone: '' });
-  const [isAdding, setIsAdding] = useState(false);
-
-  const handleAddDetailer = async (e) => {
-    e.preventDefault();
-    if (!newUser.name || !newUser.pin) return;
-    if (newUser.pin.length !== 4) {
-      alert('PIN must be exactly 4 digits');
-      return;
-    }
-
-    setIsAdding(true);
-    try {
-      await V2.post('/users', {
-        name: newUser.name,
-        pin: newUser.pin,
-        role: newUser.role,
-        phone: newUser.phone
-      });
-      setNewUser({ name: '', pin: '', role: 'detailer', phone: '' });
-      alert('User added successfully');
-      // FIXED: Reload users to show new team member
-      window.location.reload();
-    } catch (err) {
-      alert('Failed to add user: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setIsAdding(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Add New User */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Add New Team Member</h3>
-        <form onSubmit={handleAddDetailer} className="space-y-4">
-          <input
-            type="text"
-            value={newUser.name}
-            onChange={(e) => setNewUser({...newUser, name: e.target.value})}
-            placeholder="Full Name"
-            className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-          <input
-            type="text"
-            value={newUser.pin}
-            onChange={(e) => setNewUser({...newUser, pin: e.target.value})}
-            placeholder="4-Digit PIN"
-            maxLength="4"
-            className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-          <input
-            type="tel"
-            value={newUser.phone}
-            onChange={(e) => setNewUser({...newUser, phone: e.target.value})}
-            placeholder="Phone Number (optional)"
-            className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <div>
-            <label className="block text-gray-700 text-sm mb-2">Role</label>
-            <select
-              value={newUser.role}
-              onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-              className="w-full bg-gray-50 text-gray-900 border border-gray-300 rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="detailer">Detailer</option>
-              <option value="salesperson">Salesperson</option>
-              <option value="manager">Manager</option>
-            </select>
-          </div>
-          <button 
-            type="submit"
-            disabled={isAdding}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-400"
-          >
-            {isAdding ? 'Adding...' : 'Add Member'}
-          </button>
-        </form>
-      </div>
-
-      {/* Current Team Members */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Team Members</h3>
-        <div className="space-y-3">
-          {detailers.map(user => (
-            <div key={user.id || user._id} className="bg-gray-50 rounded-lg p-4 border border-gray-200 flex justify-between items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-gray-900 font-medium">{user.name}</p>
-                  <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                    user.role === 'manager' ? 'bg-purple-100 text-purple-800' :
-                    user.role === 'salesperson' ? 'bg-green-100 text-green-800' :
-                    'bg-blue-100 text-blue-800'
-                  }`}>
-                    {user.role}
-                  </span>
-                </div>
-                <p className="text-gray-600 text-sm">PIN: {user.pin}</p>
-                {user.phone && (
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="text-gray-600 text-sm">Phone: {user.phone}</p>
-                    <button 
-                      onClick={() => {
-                        const message = `Hi ${user.name}, you have a new job assignment. Please check the system for details.`;
-                        window.open(`sms:${user.phone}?body=${encodeURIComponent(message)}`, '_blank');
-                      }}
-                      className="text-blue-600 hover:text-blue-800 text-sm underline"
-                    >
-                      Send SMS
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button 
-                onClick={() => onDeleteUser(user.id || user._id)}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-              >
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -4555,7 +5415,7 @@ function ReportsView({ jobs = [], users = {} }) {
     </div>
 
     <div class="footer">
-        <p>Report generated by Cleanup Tracker - Mission Ford of Dearborn</p>
+        <p>Report generated by Cleanup Tracker - Professional Vehicle Management System</p>
         <p class="no-print">To save as PDF: Use your browser's Print function and select "Save as PDF"</p>
     </div>
 </body>
@@ -4580,9 +5440,9 @@ function ReportsView({ jobs = [], users = {} }) {
   // Error boundary for reports
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6">
+      <div className="min-h-screen bg-black p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-xl p-8 shadow-lg border border-red-200">
+          <div className="bg-black rounded-xl p-8 shadow-lg border border-red-200">
             <div className="text-center">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4615,7 +5475,7 @@ function ReportsView({ jobs = [], users = {} }) {
               <div className="animate-spin w-16 h-16 border-t-4 border-blue-600 rounded-full mx-auto absolute top-0 left-1/2 transform -translate-x-1/2"></div>
             </div>
             <div className="space-y-3">
-              <p className="text-gray-900 text-xl font-bold animate-pulse">Loading Cleanup Tracker</p>
+              <p className="text-white text-xl font-bold animate-pulse">Loading Cleanup Tracker</p>
               <p className="text-gray-700 text-base">Gathering your reports and analytics...</p>
               <div className="flex justify-center space-x-1 mt-4">
                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
@@ -4630,19 +5490,19 @@ function ReportsView({ jobs = [], users = {} }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-black p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Filters & Export */}
-        <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">📊 Reports Dashboard</h2>
+        <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
+          <h2 className="text-2xl font-bold text-white mb-4">📊 Reports Dashboard</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
             <div>
               <label className="block text-gray-700 text-sm font-semibold mb-2">Start Date</label>
-              <input type="date" value={start} onChange={e => setStart(e.target.value)} className="w-full bg-white text-gray-900 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <input type="date" value={start} onChange={e => setStart(e.target.value)} className="w-full bg-black text-white border border-gray-700 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
             <div>
               <label className="block text-gray-700 text-sm font-semibold mb-2">End Date</label>
-              <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="w-full bg-white text-gray-900 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="w-full bg-black text-white border border-gray-700 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
             <div className="md:col-span-2 flex gap-2">
               <button
@@ -4701,7 +5561,7 @@ function ReportsView({ jobs = [], users = {} }) {
               </button>
               <button
                 onClick={() => { setStart(''); setEnd(''); }}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-100 text-sm font-semibold shadow transition-all"
+                className="px-4 py-2 rounded-lg border border-gray-700 text-gray-700 bg-black hover:bg-gray-900 text-sm font-semibold shadow transition-all"
               >
                 Clear
               </button>
@@ -4711,31 +5571,31 @@ function ReportsView({ jobs = [], users = {} }) {
 
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
             <h4 className="text-gray-600 text-sm font-semibold mb-2">Period Total</h4>
-            <p className="text-3xl font-bold text-gray-900">{displayData.filteredTotal}</p>
+            <p className="text-3xl font-bold text-white">{displayData.filteredTotal}</p>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
             <h4 className="text-gray-600 text-sm font-semibold mb-2">Completed</h4>
             <p className="text-3xl font-bold text-green-600">{displayData.filteredCompleted}</p>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
             <h4 className="text-gray-600 text-sm font-semibold mb-2">Avg Time/Job</h4>
             <p className="text-3xl font-bold text-blue-600">{displayData.avgEfficiency || 'N/A'}</p>
           </div>
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
             <h4 className="text-gray-600 text-sm font-semibold mb-2">Last 7 Days</h4>
             <p className="text-3xl font-bold text-orange-600">{displayData.totalLast7Days}</p>
           </div>
         </div>
 
         {/* Detailer Performance - Click to see details */}
-        <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-          <h3 className="text-gray-900 font-bold text-xl mb-6">📈 Detailer Performance (Click for Details)</h3>
+        <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
+          <h3 className="text-white font-bold text-xl mb-6">📈 Detailer Performance (Click for Details)</h3>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200">
+                <tr className="border-b border-gray-800">
                   <th className="text-left text-gray-700 text-sm font-semibold py-3">Name</th>
                   <th className="text-right text-gray-700 text-sm font-semibold py-3">Total Jobs</th>
                   <th className="text-right text-gray-700 text-sm font-semibold py-3">Avg Time</th>
@@ -4752,10 +5612,10 @@ function ReportsView({ jobs = [], users = {} }) {
                   return (
                     <tr 
                       key={idx} 
-                      className="border-b border-gray-100 cursor-pointer hover:bg-blue-50 transition-all"
+                      className="border-b border-gray-800 cursor-pointer hover:bg-blue-50 transition-all"
                       onClick={() => handleDetailerClick(perf.name)}
                     >
-                      <td className="text-gray-900 py-3 font-medium">{perf.name}</td>
+                      <td className="text-white py-3 font-medium">{perf.name}</td>
                       <td className="text-gray-700 text-right py-3">{perf.totalJobs}</td>
                       <td className="text-green-600 text-right py-3 font-medium">{avgTimeStr}</td>
                       <td className="text-blue-600 text-right py-3">{minTimeStr}</td>
@@ -4771,8 +5631,8 @@ function ReportsView({ jobs = [], users = {} }) {
 
         {/* Service Type Breakdown - Click to see details */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-            <h3 className="text-gray-900 font-bold text-xl mb-6">🔧 Service Types (Click for Details)</h3>
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
+            <h3 className="text-white font-bold text-xl mb-6">🔧 Service Types (Click for Details)</h3>
             <div className="space-y-3">
               {(displayData.serviceTypePerformance || []).map((data, idx) => {
                 const avgTimeStr = data.avgTime ? DateUtils.formatDuration(data.avgTime) : 'N/A';
@@ -4781,11 +5641,11 @@ function ReportsView({ jobs = [], users = {} }) {
                 return (
                   <div 
                     key={idx} 
-                    className="space-y-3 p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-all border border-gray-200"
+                    className="space-y-3 p-4 bg-black rounded-lg cursor-pointer hover:bg-blue-50 transition-all border border-gray-800"
                     onClick={() => handleServiceTypeClick(data)}
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-900 font-semibold">{data.name}</span>
+                      <span className="text-white font-semibold">{data.name}</span>
                       <span className="text-gray-600 text-sm font-medium">{data.jobs?.length || 0} jobs</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-sm">
@@ -4808,8 +5668,8 @@ function ReportsView({ jobs = [], users = {} }) {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200">
-            <h3 className="text-gray-900 font-bold text-xl mb-6">📅 Daily Trends</h3>
+          <div className="bg-black rounded-xl p-6 shadow-lg border border-gray-800">
+            <h3 className="text-white font-bold text-xl mb-6">📅 Daily Trends</h3>
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {Object.entries(displayData.dailyStats || {})
                 .sort(([a], [b]) => new Date(b) - new Date(a))
@@ -4817,8 +5677,8 @@ function ReportsView({ jobs = [], users = {} }) {
                 .map(([date, stats]) => {
                   const rate = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
                   return (
-                    <div key={date} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                      <span className="text-gray-900 text-sm font-medium">{new Date(date).toLocaleDateString()}</span>
+                    <div key={date} className="flex justify-between items-center p-3 bg-black rounded-lg border border-gray-800">
+                      <span className="text-white text-sm font-medium">{new Date(date).toLocaleDateString()}</span>
                       <span className="text-gray-700 text-sm font-semibold">{stats.completed}/{stats.total} ({rate}%)</span>
                     </div>
                   );
@@ -4831,9 +5691,9 @@ function ReportsView({ jobs = [], users = {} }) {
         {/* Drill-Down Modal */}
         {showDrillDown && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-xl p-6 max-w-6xl w-full max-h-[80vh] overflow-y-auto shadow-2xl border border-gray-200">
+            <div className="bg-black rounded-xl p-6 max-w-6xl w-full max-h-[80vh] overflow-y-auto shadow-2xl border border-gray-800">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-gray-900 font-bold text-2xl">
+                <h3 className="text-white font-bold text-2xl">
                   {selectedDetailer ? `${selectedDetailer} - Job Details` : `${selectedServiceType} - Job Details`}
                 </h3>
                 <button
@@ -4851,7 +5711,7 @@ function ReportsView({ jobs = [], users = {} }) {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b-2 border-gray-200">
+                    <tr className="border-b-2 border-gray-800">
                       <th className="text-left text-gray-700 text-sm font-bold py-3">VIN</th>
                       <th className="text-left text-gray-700 text-sm font-bold py-3">Service Type</th>
                       <th className="text-left text-gray-700 text-sm font-bold py-3">Detailer</th>
@@ -4870,15 +5730,15 @@ function ReportsView({ jobs = [], users = {} }) {
                         (startTime ? 'In Progress' : 'N/A');
                       
                       return (
-                        <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50 transition-all">
-                          <td className="text-gray-900 py-3 font-mono text-sm">{job.vin || 'N/A'}</td>
+                        <tr key={idx} className="border-b border-gray-800 hover:bg-blue-50 transition-all">
+                          <td className="text-white py-3 font-mono text-sm">{job.vin || 'N/A'}</td>
                           <td className="text-gray-700 py-3">{job.serviceType || 'N/A'}</td>
                           <td className="text-gray-700 py-3">{job.detailer || job.assignedTo || 'N/A'}</td>
                           <td className="text-gray-700 py-3">
                             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                               job.status === 'Completed' ? 'bg-green-100 text-green-800' :
                               job.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-gray-100 text-gray-800'
+                              'bg-gray-900 text-gray-800'
                             }`}>
                               {job.status || 'Pending'}
                             </span>
@@ -4910,6 +5770,7 @@ function ReportsView({ jobs = [], users = {} }) {
 export default function FirebaseV2() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const handleLogin = useCallback((sessionData) => {
     if (!sessionData?.user || !sessionData?.tokens) {
@@ -4959,14 +5820,30 @@ export default function FirebaseV2() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [handleLogout]);
 
+  // 🚀 Command Palette Keyboard Shortcut (Cmd+K / Ctrl+K)
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(true);
+      }
+      if (e.key === 'Escape') {
+        setShowCommandPalette(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Show error with professional styling
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="bg-white rounded-xl p-6 border border-red-200 shadow-lg max-w-md w-full">
+      <div className="min-h-screen flex items-center justify-center bg-black p-4">
+        <div className="bg-black rounded-xl p-6 border border-red-200 shadow-lg max-w-md w-full">
           <div className="text-center">
             <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
             </div>
@@ -4996,7 +5873,7 @@ export default function FirebaseV2() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-900 text-xl">Loading...</div>
+        <div className="text-white text-xl">Loading...</div>
       </div>
     }>
       {!user ? (
@@ -5006,6 +5883,8 @@ export default function FirebaseV2() {
             user={user} 
             onLogout={handleLogout} 
             onError={handleError}
+            showCommandPalette={showCommandPalette}
+            setShowCommandPalette={setShowCommandPalette}
           />
         )}
     </Suspense>
@@ -5014,46 +5893,92 @@ export default function FirebaseV2() {
 
 // Manager Settings View
 function SettingsView({ settings, onSettingsChange }) {
-  const [siteTitle, setSiteTitle] = useState(settings?.siteTitle || 'Cleanup Tracker');
+  const mapExpectationsToList = useCallback((expectations = {}) => (
+    Object.entries(expectations).map(([name, value], index) => ({
+      id: `${name}-${index}`,
+      name,
+      duration: Number(value?.duration) || 0,
+      description: value?.description || ''
+    }))
+  ), []);
+
+  const [siteTitle, setSiteTitle] = useState(settings?.siteTitle || 'CleanUP Tracker');
   const [csvUrl, setCsvUrl] = useState(settings?.inventoryCsvUrl || '');
+  const [jobTypes, setJobTypes] = useState(() => mapExpectationsToList(settings?.serviceExpectations));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setSiteTitle(settings?.siteTitle || 'Cleanup Tracker');
+    setSiteTitle(settings?.siteTitle || 'CleanUP Tracker');
     setCsvUrl(settings?.inventoryCsvUrl || '');
-  }, [settings]);
+    setJobTypes(mapExpectationsToList(settings?.serviceExpectations));
+  }, [settings, mapExpectationsToList]);
 
-  const saveSettings = async () => {
+  const updateJobType = (id, field, value) => {
+    setJobTypes(prev => prev.map(type => type.id === id ? { ...type, [field]: field === 'duration' ? Number(value) || 0 : value } : type));
+  };
+
+  const addJobType = () => {
+    setJobTypes(prev => ([
+      ...prev,
+      {
+        id: `new-${Date.now()}`,
+        name: 'New Service',
+        duration: 60,
+        description: ''
+      }
+    ]));
+  };
+
+  const removeJobType = (id) => {
+    setJobTypes(prev => prev.filter(type => type.id !== id));
+  };
+
+  const persistSettings = async (options = { refreshInventory: false }) => {
     setSaving(true);
     try {
-      // Save site title
-      await V2.put('/settings', { key: 'siteTitle', value: siteTitle });
-      // Save CSV URL using settings (and also set-csv for compatibility)
-      if (csvUrl?.trim()) {
-        try {
-          await V2.post('/vehicles/set-csv', { url: csvUrl.trim() });
-        } catch (_) {
-          // fallback to generic settings endpoint
-          await V2.put('/settings', { key: 'inventoryCsvUrl', value: csvUrl.trim() });
+      const normalizedJobTypes = jobTypes.reduce((acc, type) => {
+        const trimmedName = type.name?.trim();
+        if (!trimmedName) {
+          return acc;
         }
+        acc[trimmedName] = {
+          duration: Math.max(0, Math.round(Number(type.duration) || 0)),
+          description: (type.description || '').trim()
+        };
+        return acc;
+      }, {});
+
+      const tasks = [
+        V2.put('/settings', { key: 'siteTitle', value: siteTitle?.trim() || 'CleanUP Tracker' }),
+        V2.put('/settings', { key: 'serviceExpectations', value: normalizedJobTypes })
+      ];
+
+      const trimmedUrl = csvUrl?.trim() || '';
+      if (trimmedUrl) {
+        tasks.push(
+          V2.post('/vehicles/set-csv', { url: trimmedUrl }).catch(() => V2.put('/settings', { key: 'inventoryCsvUrl', value: trimmedUrl }))
+        );
+      } else {
+        tasks.push(V2.put('/settings', { key: 'inventoryCsvUrl', value: '' }));
       }
-      const res = await V2.get('/settings');
-      onSettingsChange(res.data || {});
-      alert('Settings saved.');
+
+      await Promise.all(tasks);
+
+      if (options.refreshInventory) {
+        await V2.post('/vehicles/refresh');
+      }
+
+      const latestSettings = await V2.get('/settings');
+      onSettingsChange({
+        ...(latestSettings.data || {}),
+        serviceExpectations: normalizedJobTypes
+      });
+
+      alert(options.refreshInventory ? 'Settings saved and inventory refreshed.' : 'Settings saved.');
     } catch (err) {
       alert('Failed to save settings: ' + (err.response?.data?.error || err.message));
     } finally {
       setSaving(false);
-    }
-  };
-
-  const saveAndImport = async () => {
-    await saveSettings();
-    try {
-      await V2.post('/vehicles/refresh');
-      alert('Inventory refreshed from CSV.');
-    } catch (err) {
-      alert('Refresh failed: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -5066,43 +5991,132 @@ function SettingsView({ settings, onSettingsChange }) {
     }
   };
 
+  const totalDuration = jobTypes.reduce((sum, type) => sum + (Number(type.duration) || 0), 0);
+
   return (
     <div className="space-y-6">
-      <section className="bg-white rounded-xl p-6 border border-gray-200">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">General</h3>
+      <section className="bg-black rounded-2xl border border-gray-800 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-white text-lg font-semibold">Brand Identity</h3>
+            <p className="text-[11px] uppercase tracking-widest text-gray-500">Update the look that appears across the platform</p>
+          </div>
+          <span className="text-xs text-gray-500">Total Services: {jobTypes.length}</span>
+        </div>
         <div className="space-y-4">
           <div>
-            <label className="block text-gray-700 text-sm mb-2">Site Title</label>
+            <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Site Title</label>
             <input
               type="text"
               value={siteTitle}
               onChange={(e) => setSiteTitle(e.target.value)}
-              className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
-              placeholder="Cleanup Tracker"
+              className="w-full bg-gray-950 text-white border border-gray-800 rounded-xl py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
+              placeholder="CleanUP Tracker"
             />
           </div>
         </div>
       </section>
 
-      <section className="bg-white rounded-xl p-6 border border-gray-200">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">Inventory Source</h3>
+      <section className="bg-black rounded-2xl border border-gray-800 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-white text-lg font-semibold">Inventory Source</h3>
+            <p className="text-[11px] uppercase tracking-widest text-gray-500">Control live vehicle feeds</p>
+          </div>
+          <button
+            onClick={refreshOnly}
+            className="hidden sm:inline-flex items-center gap-2 rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-gray-600"
+            type="button"
+          >
+            Refresh Inventory
+          </button>
+        </div>
         <div className="space-y-4">
           <div>
-            <label className="block text-gray-700 text-sm mb-2">Google Sheets CSV URL</label>
+            <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Google Sheets CSV URL</label>
             <input
               type="url"
               value={csvUrl}
               onChange={(e) => setCsvUrl(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv"
-              className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-950 text-white border border-gray-800 rounded-xl py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-600"
             />
+            <p className="text-[11px] text-gray-600 mt-2">Leave blank to disable auto-import.</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={saveSettings} disabled={saving} className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:bg-gray-400">Save</button>
-            <button onClick={saveAndImport} disabled={saving} className="px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white text-sm disabled:bg-gray-400">Save & Import</button>
-            <button onClick={refreshOnly} className="px-3 py-2 rounded bg-gray-600 hover:bg-gray-700 text-white text-sm">Refresh Inventory</button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button onClick={() => persistSettings({ refreshInventory: false })} disabled={saving} className="inline-flex justify-center items-center gap-2 px-4 py-2.5 rounded-full bg-white text-black font-semibold text-sm disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save Settings'}
+            </button>
+            <button onClick={() => persistSettings({ refreshInventory: true })} disabled={saving} className="inline-flex justify-center items-center gap-2 px-4 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm disabled:opacity-50">
+              {saving ? 'Working…' : 'Save & Import Vehicles'}
+            </button>
+            <button onClick={refreshOnly} type="button" className="sm:hidden inline-flex justify-center items-center gap-2 px-4 py-2.5 rounded-full bg-gray-900 text-gray-300 text-sm border border-gray-800">
+              Refresh Inventory
+            </button>
           </div>
         </div>
+      </section>
+
+      <section className="bg-black rounded-2xl border border-gray-800 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div>
+            <h3 className="text-white text-lg font-semibold">Job Types & Timing</h3>
+            <p className="text-[11px] uppercase tracking-widest text-gray-500">Define expectations for each service</p>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-500">
+            <span>Total Minutes: {totalDuration}</span>
+            <button onClick={addJobType} type="button" className="inline-flex items-center gap-2 rounded-full border border-gray-800 px-3 py-1.5 text-xs text-gray-300 hover:text-white hover:border-gray-600">
+              + Add Service
+            </button>
+          </div>
+        </div>
+        {jobTypes.length === 0 ? (
+          <div className="border border-dashed border-gray-800 rounded-xl p-8 text-center text-gray-500">
+            No services configured yet. Add at least one service to guide technician pacing.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {jobTypes.map(type => (
+              <div key={type.id} className="bg-gray-950 border border-gray-900 rounded-xl p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">Service Name</label>
+                    <input
+                      type="text"
+                      value={type.name}
+                      onChange={(e) => updateJobType(type.id, 'name', e.target.value)}
+                      className="w-full bg-black text-white border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">Description</label>
+                    <textarea
+                      value={type.description}
+                      onChange={(e) => updateJobType(type.id, 'description', e.target.value)}
+                      rows={2}
+                      className="w-full bg-black text-white border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
+                      placeholder="Optional guidance detailers see in dashboards"
+                    />
+                  </div>
+                </div>
+                <div className="w-full sm:w-40 space-y-2">
+                  <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">Target Minutes</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={type.duration}
+                    onChange={(e) => updateJobType(type.id, 'duration', e.target.value)}
+                    className="w-full bg-black text-white border border-gray-800 rounded-lg py-2 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button onClick={() => removeJobType(type.id)} type="button" className="inline-flex items-center justify-center w-full rounded-full border border-gray-800 px-3 py-2 text-xs text-red-400 hover:border-red-500">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="mt-4 text-[11px] text-gray-500">These expectations power timeline badges, analytics, and technician pacing recommendations.</p>
       </section>
     </div>
   );
@@ -5146,22 +6160,32 @@ function MySettingsView({ user }) {
   };
 
   return (
-    <div className="max-w-md mx-auto space-y-4">
-      <div className="bg-white rounded-xl p-6 border border-gray-200">
-        <h3 className="text-gray-900 font-semibold text-lg mb-4">My Settings</h3>
-        <div className="space-y-3">
+    <div className="max-w-xl mx-auto space-y-4">
+      <div className="bg-black border border-gray-800 rounded-2xl p-4 sm:p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <label className="block text-gray-700 text-sm mb-1">Name</label>
+            <h3 className="text-white font-semibold text-lg">Profile Preferences</h3>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Optimized for the X experience</p>
+          </div>
+          <span className="px-3 py-1 text-[11px] uppercase tracking-wide text-gray-400 border border-gray-800 rounded-full">
+            {user.role}
+          </span>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1.5">Display Name</label>
             <input
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
+              className="w-full bg-gray-950 text-white text-sm border border-gray-800 rounded-xl py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
             />
           </div>
+
           {user.role === 'manager' && (
             <div>
-              <label className="block text-gray-700 text-sm mb-1">New PIN (optional)</label>
+              <label className="block text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1.5">New PIN (optional)</label>
               <input
                 type="password"
                 inputMode="numeric"
@@ -5169,18 +6193,26 @@ function MySettingsView({ user }) {
                 maxLength={4}
                 value={pin}
                 onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-                className="w-full bg-gray-50 text-gray-900 placeholder-gray-500 border border-gray-300 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                className="w-full bg-gray-950 text-white text-sm border border-gray-800 rounded-xl py-2.5 px-3 focus:outline-none focus:ring-1 focus:ring-gray-600 placeholder-gray-600"
               />
+              <p className="mt-1 text-[11px] text-gray-600 uppercase tracking-wide">Requires 4 digits</p>
             </div>
           )}
+
           {(user.role === 'detailer' || user.role === 'technician') && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <p className="text-amber-800 text-sm">
-                🔒 PIN changes are restricted for detailers. Contact your manager to update your PIN.
+            <div className="bg-gray-950 border border-gray-800 rounded-xl p-3">
+              <p className="text-sm text-gray-300 flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/10 text-white text-xs">🔒</span>
+                PIN changes are managed by your supervisor. Reach out to your manager for updates.
               </p>
             </div>
           )}
-          <button onClick={save} disabled={saving} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500">
+
+          <button
+            onClick={save}
+            disabled={saving}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-semibold py-2.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
@@ -5223,7 +6255,7 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <div className="mb-8">
-        <h2 className="text-3xl font-bold text-gray-900 mb-2">Quality Control Dashboard</h2>
+        <h2 className="text-3xl font-bold text-white mb-2">Quality Control Dashboard</h2>
         <p className="text-gray-600">Review and approve completed jobs before final delivery</p>
       </div>
 
@@ -5256,9 +6288,9 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
       </div>
 
       {/* Jobs Needing Review */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-xl font-semibold text-gray-900">Jobs Awaiting QC Review</h3>
+      <div className="bg-black rounded-xl shadow-sm border border-gray-800">
+        <div className="p-6 border-b border-gray-800">
+          <h3 className="text-xl font-semibold text-white">Jobs Awaiting QC Review</h3>
         </div>
         
         {qcJobs.length === 0 ? (
@@ -5268,7 +6300,7 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <h4 className="text-lg font-medium text-gray-900 mb-2">All caught up!</h4>
+            <h4 className="text-lg font-medium text-white mb-2">All caught up!</h4>
             <p className="text-gray-600">No jobs are currently waiting for quality control review.</p>
           </div>
         ) : (
@@ -5278,7 +6310,7 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h4 className="text-lg font-semibold text-gray-900">
+                      <h4 className="text-lg font-semibold text-white">
                         {job.year} {job.make} {job.model}
                       </h4>
                       {job.vehicleColor && (

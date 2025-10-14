@@ -5,13 +5,14 @@
     "cleanup-tracker-app/client"
   ],
   "scripts": {
-  "dev:client": "npm run start --workspace=cleanup-tracker-client",
-  "build": "npm run build --workspace=cleanup-tracker-client",
-  "dev:server": "npx wrangler@4 pages dev cleanup-tracker-app/client/build --compatibility-date=2023-05-18 --local --port=8788",
-  "start:server": "npm run dev:server",
-  "dev:all": "npm run build --workspace=cleanup-tracker-client && npx wrangler@4 pages dev cleanup-tracker-app/client/build --compatibility-date=2023-05-18 --local --port=8788"
+    "dev:client": "cd cleanup-tracker-app/client && npm start",
+    "build": "cd cleanup-tracker-app/client && npm run build",
+  "dev:pages": "cd cleanup-tracker-app && npx wrangler@4 pages dev client/build --local --port=8788",
+    "dev:server-express": "cd cleanup-tracker-app/server && PORT=5051 npm start",
+    "dev:all": "concurrently -k -n PAGES,SERVER,CLIENT -c blue,magenta,green \"npm:dev:pages\" \"npm:dev:server-express\" \"npm:dev:client\""
   },
   "devDependencies": {
-  "wrangler": "^4.35.0"
+    "concurrently": "^8.2.2",
+    "wrangler": "^4.35.0"
   }
 }

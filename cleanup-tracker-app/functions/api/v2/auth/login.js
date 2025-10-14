@@ -18,10 +18,12 @@ export async function onRequestPost(context) {
 
     // Temporary user database (hardcoded) - replace with D1 when issue is resolved
     const tempUsers = {
-      '0000': { id: 1, employeeId: '0000', name: 'Admin', pin: '0000', role: 'admin' },
-      '1234': { id: 2, employeeId: '1234', name: 'Test User', pin: '1234', role: 'technician' },
-      '0001': { id: 3, employeeId: '0001', name: 'Manager', pin: '0001', role: 'manager' },
-      '1709': { id: 4, employeeId: '1709', name: 'Brian', pin: '1709', role: 'detailer' }
+      '1701': { id: 1, employeeId: '1701', name: 'Joe Gallant', pin: '1701', role: 'manager' },
+      '1716': { id: 2, employeeId: '1716', name: 'Alfred', pin: '1716', role: 'detailer' },
+      '1709': { id: 3, employeeId: '1709', name: 'Brian', pin: '1709', role: 'detailer' },
+      '2001': { id: 4, employeeId: '2001', name: 'Samantha', pin: '2001', role: 'sales' },
+      '2002': { id: 5, employeeId: '2002', name: 'David', pin: '2002', role: 'sales' },
+      '2003': { id: 6, employeeId: '2003', name: 'Rachel', pin: '2003', role: 'sales' }
     };
 
     const user = tempUsers[employeeId];
@@ -47,8 +49,17 @@ export async function onRequestPost(context) {
       employeeNumber: user.employeeId
     };
 
+    // Provide tokens to match frontend expectations
+    const tokens = {
+      accessToken: 'fallback-access-token',
+      refreshToken: 'fallback-refresh-token',
+      accessTokenExpiresIn: '15m',
+      refreshTokenExpiresIn: '7d'
+    };
+
     return new Response(JSON.stringify({
-      user: userData
+      user: userData,
+      tokens
     }), {
       headers: {
         'Content-Type': 'application/json',

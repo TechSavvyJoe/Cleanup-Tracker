@@ -7,28 +7,19 @@ import React, { useState, useEffect, useRef } from 'react';
  * GLASSMORPHISM CARD
  * Modern frosted glass effect with subtle animations
  */
-export const GlassCard = ({ children, className = '', hover = true, onClick }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  
-  return (
-    <div 
-      className={`
-        backdrop-blur-xl bg-white/80 dark:bg-gray-900/80
-        border border-white/20 dark:border-gray-700/30
-        rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-gray-900/50
-        transition-all duration-300 ease-out
-        ${hover ? 'hover:shadow-2xl hover:-translate-y-1 hover:bg-white/90 dark:hover:bg-gray-900/90' : ''}
-        ${isHovered ? 'scale-[1.02]' : 'scale-100'}
-        ${className}
-      `}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-};
+export const GlassCard = ({ children, className = '', hover = true, onClick }) => (
+  <div
+    className={`
+      bg-black border border-gray-800 rounded-xl
+      transition-colors duration-200 ease-out
+      ${hover ? 'hover:border-gray-700 hover:bg-gray-900' : ''}
+      ${className}
+    `}
+    onClick={onClick}
+  >
+    {children}
+  </div>
+);
 
 /**
  * ANIMATED PROGRESS RING

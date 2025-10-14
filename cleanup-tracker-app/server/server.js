@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const Vehicle = require('./models/Vehicle');
+const { getInventoryCsvUrl } = require('./utils/inventorySource');
 
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -228,8 +229,8 @@ function startServer(portToTry) {
 // Import Google Sheets inventory CSV at startup
 const csv = require('csv-parser');
 async function fetchAndImportInventory() {
-  const SHEET_URL = process.env.INVENTORY_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv';
-  console.log('Fetching inventory CSV...');
+  const SHEET_URL = getInventoryCsvUrl();
+  console.log('Fetching inventory CSV from', SHEET_URL);
   const response = await axios.get(SHEET_URL, { responseType: 'stream' });
   const headerMap = {
     0: 'newUsed', 1: 'stockNumber', 2: 'vehicle', 3: 'year', 4: 'make', 5: 'model',

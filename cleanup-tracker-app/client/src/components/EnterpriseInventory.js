@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { v2Request } from '../utils/v2Client';
 
 const EnterpriseInventory = ({ theme = 'dark' }) => {
   const [vehicles, setVehicles] = useState([]);
@@ -9,48 +10,68 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
   const [sortBy, setSortBy] = useState('updatedAt');
   const [sortOrder, setSortOrder] = useState('desc');
   const [selectedVehicle, setSelectedVehicle] = useState(null);
-  const [showAddForm, setShowAddForm] = useState(false);
 
   // Load vehicles data
   useEffect(() => {
+    let isActive = true;
+
     const loadVehicles = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const response = await fetch('/api/v2/vehicles');
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+        const response = await v2Request('get', '/vehicles', null, {
+          params: { limit: 500 },
+          headers: { Accept: 'application/json' }
+        });
 
-        const data = await response.json();
-        if (data.success && data.vehicles) {
-          setVehicles(data.vehicles);
+        const payload = response?.data;
+        if (!isActive) return;
+
+        if (Array.isArray(payload)) {
+          setVehicles(payload);
+        } else if (payload?.success && Array.isArray(payload.vehicles)) {
+          setVehicles(payload.vehicles);
         } else {
           throw new Error('Invalid response format');
         }
       } catch (err) {
+        if (!isActive) return;
         console.error('Failed to load vehicles:', err);
-        setError(err.message);
+        setError(err.message || 'Failed to load vehicles');
       } finally {
-        setLoading(false);
+        if (isActive) {
+          setLoading(false);
+        }
       }
     };
 
     loadVehicles();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   // Enhanced filtering and sorting
   const filteredAndSortedVehicles = useMemo(() => {
     let filtered = vehicles.filter(vehicle => {
+      const vin = vehicle.vin || '';
+      const stock = vehicle.stockNumber || '';
+      const make = vehicle.make || '';
+      const model = vehicle.model || '';
+      const year = vehicle.year ? String(vehicle.year) : '';
+      const description = vehicle.vehicle || '';
       const matchesSearch = searchTerm === '' ||
-        vehicle.vin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vehicle.stockNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vehicle.make?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vehicle.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        vehicle.year?.toString().includes(searchTerm);
+        vin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        stock.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        make.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        model.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        year.includes(searchTerm) ||
+        description.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesStatus = statusFilter === 'all' || vehicle.status === statusFilter;
+  const normalizedVehicleStatus = (vehicle.status || '').toLowerCase().replace(/\s+/g, '-');
+  const matchesStatus = statusFilter === 'all' || normalizedVehicleStatus === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
@@ -60,13 +81,30 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
       let aVal = a[sortBy];
       let bVal = b[sortBy];
 
-      if (sortBy === 'year') {
-        aVal = parseInt(aVal) || 0;
-        bVal = parseInt(bVal) || 0;
+      if (sortBy === 'updatedAt' || sortBy === 'createdAt') {
+        const aTime = aVal ? new Date(aVal).getTime() : 0;
+        const bTime = bVal ? new Date(bVal).getTime() : 0;
+        return sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
       }
 
-      if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+      if (sortBy === 'year') {
+        aVal = parseInt(aVal, 10) || 0;
+        bVal = parseInt(bVal, 10) || 0;
+      }
+
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+      }
+      if (typeof bVal === 'string') {
+        bVal = bVal.toLowerCase();
+      }
+
+      if (aVal < bVal) {
+        return sortOrder === 'asc' ? -1 : 1;
+      }
+      if (aVal > bVal) {
+        return sortOrder === 'asc' ? 1 : -1;
+      }
       return 0;
     });
 
@@ -75,7 +113,8 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
 
   // Get status color
   const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
+    const normalized = (status || '').toLowerCase().replace(/\s+/g, '-');
+    switch (normalized) {
       case 'available': return 'bg-green-500';
       case 'in-service': return 'bg-yellow-500';
       case 'maintenance': return 'bg-red-500';
@@ -204,28 +243,26 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
 
           {/* Summary */}
           <div className="mt-4 pt-4 border-t border-gray-700">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">
-                Showing {filteredAndSortedVehicles.length} of {vehicles.length} vehicles
-              </span>
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                </svg>
-                Add Vehicle
-              </button>
-            </div>
+            <span className="text-gray-300">
+              Showing {filteredAndSortedVehicles.length} of {vehicles.length} vehicles
+            </span>
           </div>
         </div>
 
         {/* Vehicle Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredAndSortedVehicles.map((vehicle) => (
+          {filteredAndSortedVehicles.map((vehicle) => {
+            const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model]
+              .filter(Boolean)
+              .join(' ') || vehicle.vehicle || 'Vehicle';
+            const subtitleParts = [vehicle.trim, vehicle.color].filter(Boolean);
+            const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : '';
+            const stockNumber = vehicle.stockNumber || 'N/A';
+            const vin = vehicle.vin || 'Unknown';
+
+            return (
             <div
-              key={vehicle.id}
+              key={vehicle.id || vehicle._id || vehicle.vin || vehicle.stockNumber}
               onClick={() => setSelectedVehicle(vehicle)}
               className="bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg p-6 cursor-pointer transition-all duration-200 hover:border-blue-500 hover:shadow-lg"
             >
@@ -235,31 +272,47 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
                   <div className="w-2 h-2 bg-white rounded-full mr-2"></div>
                   {vehicle.status || 'Unknown'}
                 </div>
-                <span className="text-gray-400 text-sm">#{vehicle.stockNumber}</span>
+                <span className="text-gray-400 text-sm">#{stockNumber}</span>
               </div>
 
               {/* Vehicle Info */}
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-white mb-1">
-                  {vehicle.year} {vehicle.make} {vehicle.model}
+                  {vehicleTitle}
                 </h3>
-                <p className="text-gray-400 text-sm mb-2">{vehicle.trim} • {vehicle.color}</p>
-                <p className="text-gray-500 text-xs font-mono">{vehicle.vin}</p>
+                {subtitle && (
+                  <p className="text-gray-400 text-sm mb-2">{subtitle}</p>
+                )}
+                <p className="text-gray-500 text-xs font-mono">{vin}</p>
               </div>
 
               {/* Action Buttons */}
               <div className="flex gap-2">
-                <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm transition-colors">
+                <button
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm transition-colors"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedVehicle(vehicle);
+                  }}
+                >
                   View Details
                 </button>
-                <button className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded text-sm transition-colors">
+                <button
+                  className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded text-sm transition-colors"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedVehicle(vehicle);
+                  }}
+                  aria-label="More vehicle actions"
+                >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                   </svg>
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Empty State */}
@@ -277,12 +330,7 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
               }
             </p>
             {(!searchTerm && statusFilter === 'all') && (
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition-colors"
-              >
-                Add Your First Vehicle
-              </button>
+              <p className="text-gray-500">Inventory data sync controls are available from the Vehicles settings page.</p>
             )}
           </div>
         )}
@@ -323,7 +371,7 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Status</label>
                   <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium text-white ${getStatusColor(selectedVehicle.status)}`}>
-                    {selectedVehicle.status}
+                    {selectedVehicle.status || 'Unknown'}
                   </div>
                 </div>
               </div>
