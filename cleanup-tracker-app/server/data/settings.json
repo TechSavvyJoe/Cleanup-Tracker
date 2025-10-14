@@ -1,4 +1,34 @@
 {
   "siteTitle": "Cleanup Tracker",
-  "inventoryCsvUrl": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv"
+  "inventoryCsvUrl": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSTW7Nwrbbl3Lp7R3RlKfSx-cd1tAffBzTINNOrCnaU1wp3kA7av63Y5Af8Jn4ATMDB09XcIAO_wodU/pub?output=csv",
+  "serviceExpectations": {
+    "Cleanup": {
+      "duration": 45,
+      "description": "Interior/exterior basic cleaning"
+    },
+    "Detail": {
+      "duration": 120,
+      "description": "Full interior and exterior detailing"
+    },
+    "Delivery": {
+      "duration": 30,
+      "description": "Final prep and delivery setup"
+    },
+    "Rewash": {
+      "duration": 20,
+      "description": "Quick wash and rinse"
+    },
+    "Lot Car": {
+      "duration": 60,
+      "description": "Lot positioning and prep"
+    },
+    "FCTP": {
+      "duration": 90,
+      "description": "Ford Customer Trade Program prep"
+    },
+    "Touch-up": {
+      "duration": 30,
+      "description": "Minor paint and interior touch-ups"
+    }
+  }
 }

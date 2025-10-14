@@ -265,8 +265,8 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
           </div>
         </div>
 
-        {/* Vehicle Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {/* Vehicle Grid - OPTIMIZED: Show more vehicles with compact layout */}
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filteredAndSortedVehicles.map((vehicle) => {
             const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model]
               .filter(Boolean)
@@ -275,53 +275,73 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
             const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : '';
             const stockNumber = vehicle.stockNumber || 'N/A';
             const vin = vehicle.vin || 'Unknown';
+            const mileage = vehicle.mileage || vehicle.odometer || 'N/A';
+            const location = vehicle.location || 'Lot';
 
             return (
             <div
               key={vehicle.id || vehicle._id || vehicle.vin || vehicle.stockNumber}
               onClick={() => setSelectedVehicle(vehicle)}
-              className="bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg p-6 cursor-pointer transition-all duration-200 hover:border-blue-500 hover:shadow-lg"
+              className="bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-lg p-4 cursor-pointer transition-all duration-200 hover:border-blue-500 hover:shadow-lg"
             >
-              {/* Status Badge */}
-              <div className="flex items-center justify-between mb-4">
-                <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white ${getStatusColor(vehicle.status)}`}>
-                  <div className="w-2 h-2 bg-white rounded-full mr-2"></div>
+              {/* Compact Status Badge */}
+              <div className="flex items-center justify-between mb-3">
+                <div className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium text-white ${getStatusColor(vehicle.status)}`}>
+                  <div className="w-1.5 h-1.5 bg-white rounded-full mr-1.5"></div>
                   {vehicle.status || 'Unknown'}
                 </div>
-                <span className="text-gray-400 text-sm">#{stockNumber}</span>
+                <span className="text-gray-400 text-xs">#{stockNumber}</span>
               </div>
 
-              {/* Vehicle Info */}
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-white mb-1">
+              {/* Vehicle Info - Compact with enhanced data */}
+              <div className="mb-3">
+                <h3 className="text-sm font-bold text-white mb-1 line-clamp-1">
                   {vehicleTitle}
                 </h3>
                 {subtitle && (
-                  <p className="text-gray-400 text-sm mb-2">{subtitle}</p>
+                  <p className="text-gray-400 text-xs mb-1">{subtitle}</p>
                 )}
-                <p className="text-gray-500 text-xs font-mono">{vin}</p>
+                <p className="text-gray-500 text-[10px] font-mono truncate mb-2">{vin}</p>
+                
+                {/* Enhanced Data Grid - Mileage, Location, Price */}
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-gray-500">Mileage:</span>
+                    <span className="text-white font-semibold">{typeof mileage === 'number' ? mileage.toLocaleString() : mileage}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-gray-500">Location:</span>
+                    <span className="text-white font-medium">{location}</span>
+                  </div>
+                  {vehicle.price && (
+                    <div className="flex justify-between items-center text-[11px] pt-1 border-t border-gray-700">
+                      <span className="text-gray-500">Price:</span>
+                      <span className="text-green-400 font-bold">${parseInt(vehicle.price).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Compact Action Buttons */}
               <div className="flex gap-2">
                 <button
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm transition-colors"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1.5 px-2 rounded text-xs transition-colors font-medium"
                   onClick={(event) => {
                     event.stopPropagation();
                     setSelectedVehicle(vehicle);
                   }}
                 >
-                  View Details
+                  Details
                 </button>
                 <button
-                  className="bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded text-sm transition-colors"
+                  className="bg-gray-700 hover:bg-gray-600 text-white py-1.5 px-2 rounded text-xs transition-colors"
                   onClick={(event) => {
                     event.stopPropagation();
                     setSelectedVehicle(vehicle);
                   }}
                   aria-label="More vehicle actions"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                   </svg>
                 </button>
@@ -352,15 +372,18 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
         )}
       </div>
 
-      {/* Vehicle Detail Modal */}
+      {/* Vehicle Detail Modal - ENHANCED WITH MORE DATA & FUNCTIONAL BUTTONS */}
       {selectedVehicle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">
-                  {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}
-                </h2>
+                <div>
+                  <h2 className="text-2xl font-bold text-white">
+                    {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}
+                  </h2>
+                  <p className="text-gray-400 text-sm mt-1">{selectedVehicle.trim || 'Standard'}</p>
+                </div>
                 <button
                   onClick={() => setSelectedVehicle(null)}
                   className="text-gray-400 hover:text-white transition-colors"
@@ -374,29 +397,64 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">VIN</label>
-                  <p className="text-white font-mono">{selectedVehicle.vin}</p>
+                  <p className="text-white font-mono text-sm">{selectedVehicle.vin || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Stock Number</label>
-                  <p className="text-white">{selectedVehicle.stockNumber}</p>
+                  <p className="text-white font-semibold">{selectedVehicle.stockNumber || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Color</label>
-                  <p className="text-white">{selectedVehicle.color}</p>
+                  <p className="text-white">{selectedVehicle.color || 'N/A'}</p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Mileage</label>
+                  <p className="text-white font-semibold">{selectedVehicle.mileage || selectedVehicle.odometer || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Location</label>
+                  <p className="text-white">{selectedVehicle.location || 'Lot'}</p>
+                </div>
+                {selectedVehicle.price && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Price</label>
+                    <p className="text-green-400 font-bold text-lg">${parseInt(selectedVehicle.price).toLocaleString()}</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Status</label>
                   <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium text-white ${getStatusColor(selectedVehicle.status)}`}>
                     {selectedVehicle.status || 'Unknown'}
                   </div>
                 </div>
+                {selectedVehicle.description && (
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Description</label>
+                    <p className="text-white text-sm">{selectedVehicle.description}</p>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3">
-                <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
+                <button 
+                  onClick={() => {
+                    const vehicleInfo = `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`;
+                    alert(`Creating job for: ${vehicleInfo}\nVIN: ${selectedVehicle.vin}\nStock: ${selectedVehicle.stockNumber}\n\nThis would navigate to job creation with this vehicle pre-selected.`);
+                    // TODO: Implement navigation to job creation
+                    // onCreateJob && onCreateJob(selectedVehicle);
+                  }}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors font-semibold"
+                >
                   Create Job
                 </button>
-                <button className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg transition-colors">
+                <button 
+                  onClick={() => {
+                    alert(`Edit Vehicle\nVIN: ${selectedVehicle.vin}\n\nThis would open an edit form for this vehicle's details.`);
+                    // TODO: Implement vehicle editing
+                    // onEditVehicle && onEditVehicle(selectedVehicle);
+                  }}
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg transition-colors font-semibold"
+                >
                   Edit Vehicle
                 </button>
               </div>
