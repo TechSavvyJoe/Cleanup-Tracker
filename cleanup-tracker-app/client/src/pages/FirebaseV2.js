@@ -1609,7 +1609,7 @@ function MainApp({ user, onLogout, onError, showCommandPalette, setShowCommandPa
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id]); // Removed loadInitialData and toast to prevent loops
 
-  // Stop work handler
+  // Stop work handler - Mark as QC Required for quality inspection
   const handleStopWork = async () => {
     try {
       const activeJob = jobs.find(j => j.status === 'In Progress' && (
@@ -1619,14 +1619,15 @@ function MainApp({ user, onLogout, onError, showCommandPalette, setShowCommandPa
       ));
       if (!activeJob) return;
       
-      // Stop timer and mark as complete with proper timing
-      await V2.put(`/jobs/${activeJob.id}/complete`, { 
+      // Mark job as requiring QC instead of completing it directly
+      await V2.put(`/jobs/${activeJob.id}`, { 
+        status: 'QC Required',
         userId: user.id,
         completedAt: new Date().toISOString() 
       });
       
       await loadInitialData(); // Reload data
-      toast.success('Job completed successfully! 🎉');
+      toast.success('Job ready for QC inspection! ✅');
     } catch (err) {
       toast.error('Failed to complete job: ' + (err.response?.data?.error || err.message));
     }
@@ -6253,32 +6254,69 @@ function MySettingsView({ user }) {
 
 // QC View Component for Managers
 function QCView({ jobs, users, currentUser, onRefresh }) {
+  const toast = useToast();
+  const [qcModalJob, setQcModalJob] = useState(null);
+  const [qcRating, setQcRating] = useState(0);
+  const [qcPin, setQcPin] = useState('');
+  const [qcNotes, setQcNotes] = useState('');
+  const [isSubmittingQC, setIsSubmittingQC] = useState(false);
   
   // Get jobs that need QC review
   const qcJobs = jobs.filter(job => job.status === 'QC Required' || job.status === 'qc_required');
   
-  const handleQCApprove = async (job) => {
+  const handleQCSubmit = async () => {
+    if (!qcModalJob) return;
+    
+    // Validate QC PIN
+    if (!qcPin || !/^[0-9]{4}$/.test(qcPin)) {
+      toast.error('Please enter a valid 4-digit QC inspector PIN');
+      return;
+    }
+
+    // Validate rating
+    if (qcRating < 1 || qcRating > 5) {
+      toast.error('Please select a rating from 1 to 5 stars');
+      return;
+    }
+
+    setIsSubmittingQC(true);
     try {
-      await V2.put(`/jobs/${job.id}/status`, { status: 'Completed' });
+      // Submit QC approval with rating
+      await V2.put(`/jobs/${qcModalJob.id}`, {
+        status: 'QC Approved',
+        qcRating: qcRating,
+        qcEmployeeNumber: qcPin,
+        qcCompletedAt: new Date().toISOString(),
+        qcNotes: qcNotes || ''
+      });
+
+      toast.success(`QC Approved with ${qcRating} ⭐ rating!`);
+      
+      // Close modal and reset
+      setQcModalJob(null);
+      setQcRating(0);
+      setQcPin('');
+      setQcNotes('');
+      
       onRefresh();
-      alert('Job approved and marked as completed!');
-    } catch (error) {
-      console.error('Failed to approve job:', error);
-      alert('Failed to approve job: ' + (error.response?.data?.error || error.message));
+    } catch (err) {
+      toast.error('QC submission failed: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsSubmittingQC(false);
     }
   };
   
   const handleQCReject = async (job, reason) => {
     try {
-      await V2.put(`/jobs/${job.id}/status`, { 
+      await V2.put(`/jobs/${job.id}`, { 
         status: 'In Progress',
         qcNotes: reason 
       });
       onRefresh();
-      alert('Job sent back for rework');
+      toast.success('Job sent back for rework');
     } catch (error) {
       console.error('Failed to reject job:', error);
-      alert('Failed to reject job: ' + (error.response?.data?.error || error.message));
+      toast.error('Failed to reject job: ' + (error.response?.data?.error || error.message));
     }
   };
 
@@ -6376,13 +6414,13 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
                   
                   <div className="flex gap-2 ml-4">
                     <button
-                      onClick={() => handleQCApprove(job)}
+                      onClick={() => setQcModalJob(job)}
                       className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                       </svg>
-                      Approve
+                      Rate QC
                     </button>
                     <button
                       onClick={() => {
@@ -6403,6 +6441,163 @@ function QCView({ jobs, users, currentUser, onRefresh }) {
           </div>
         )}
       </div>
+
+      {/* QC Rating Modal */}
+      {qcModalJob && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-2xl max-w-lg w-full p-8 border border-gray-700 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-white">Quality Control Rating</h3>
+              <button
+                onClick={() => {
+                  setQcModalJob(null);
+                  setQcRating(0);
+                  setQcPin('');
+                  setQcNotes('');
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Vehicle Info */}
+            <div className="bg-gray-800 rounded-xl p-4 mb-6 border border-gray-700">
+              <h4 className="text-lg font-semibold text-white mb-2">
+                {qcModalJob.year} {qcModalJob.make} {qcModalJob.model}
+              </h4>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-gray-400">VIN:</span>
+                  <span className="text-white ml-2 font-mono">{qcModalJob.vin}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Stock:</span>
+                  <span className="text-white ml-2">{qcModalJob.stockNumber}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Service:</span>
+                  <span className="text-blue-400 ml-2">{qcModalJob.serviceType}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Technician:</span>
+                  <span className="text-white ml-2">{qcModalJob.technicianName}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Star Rating */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-300 mb-3">
+                Rate Quality (1-5 stars) <span className="text-red-400">*</span>
+              </label>
+              <div className="flex gap-2 justify-center">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    onClick={() => setQcRating(star)}
+                    className="transition-all duration-200 hover:scale-110"
+                  >
+                    <svg
+                      className={`w-12 h-12 ${
+                        star <= qcRating ? 'text-yellow-400' : 'text-gray-600'
+                      }`}
+                      fill={star <= qcRating ? 'currentColor' : 'none'}
+                      stroke="currentColor"
+                      strokeWidth="1"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                      />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+              <p className="text-center text-gray-400 text-sm mt-2">
+                {qcRating === 0 && 'Click to rate'}
+                {qcRating === 1 && '⭐ Poor'}
+                {qcRating === 2 && '⭐⭐ Fair'}
+                {qcRating === 3 && '⭐⭐⭐ Good'}
+                {qcRating === 4 && '⭐⭐⭐⭐ Very Good'}
+                {qcRating === 5 && '⭐⭐⭐⭐⭐ Excellent'}
+              </p>
+            </div>
+
+            {/* QC Inspector PIN */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-300 mb-2">
+                QC Inspector PIN <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={qcPin}
+                onChange={(e) => setQcPin(e.target.value.replace(/\D/g, ''))}
+                placeholder="Enter 4-digit PIN"
+                className="w-full bg-gray-800 text-white text-lg font-mono border border-gray-700 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+              />
+            </div>
+
+            {/* Notes (Optional) */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-300 mb-2">
+                Notes (Optional)
+              </label>
+              <textarea
+                value={qcNotes}
+                onChange={(e) => setQcNotes(e.target.value)}
+                placeholder="Add any quality control notes..."
+                rows={3}
+                className="w-full bg-gray-800 text-white border border-gray-700 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setQcModalJob(null);
+                  setQcRating(0);
+                  setQcPin('');
+                  setQcNotes('');
+                }}
+                className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-semibold transition-colors"
+                disabled={isSubmittingQC}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleQCSubmit}
+                disabled={isSubmittingQC || !qcPin || !qcRating}
+                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSubmittingQC ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Submit QC Approval
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

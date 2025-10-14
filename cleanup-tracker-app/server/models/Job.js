@@ -87,6 +87,12 @@ const jobSchema = new mongoose.Schema({
     qcCompletedAt: Date,
     qcNotes: String,
     qcEmployeeNumber: String,
+    qcRating: {
+        type: Number,
+        min: 1,
+        max: 5,
+        default: null
+    },
 
     // Additional tracking
     actualStartTime: Date,
