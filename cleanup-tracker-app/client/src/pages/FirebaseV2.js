@@ -5936,6 +5936,11 @@ function SettingsView({ settings, onSettingsChange }) {
   const persistSettings = async (options = { refreshInventory: false }) => {
     setSaving(true);
     try {
+      // Input validation
+      if (!Array.isArray(jobTypes)) {
+        throw new Error('Invalid job types configuration');
+      }
+
       const normalizedJobTypes = jobTypes.reduce((acc, type) => {
         const trimmedName = type.name?.trim();
         if (!trimmedName) {
@@ -5955,6 +5960,12 @@ function SettingsView({ settings, onSettingsChange }) {
 
       const trimmedUrl = csvUrl?.trim() || '';
       if (trimmedUrl) {
+        // Validate CSV URL format
+        try {
+          new URL(trimmedUrl);
+        } catch {
+          throw new Error('Invalid CSV URL format');
+        }
         tasks.push(
           V2.post('/vehicles/set-csv', { url: trimmedUrl }).catch(() => V2.put('/settings', { key: 'inventoryCsvUrl', value: trimmedUrl }))
         );
@@ -5976,6 +5987,10 @@ function SettingsView({ settings, onSettingsChange }) {
 
       alert(options.refreshInventory ? 'Settings saved and inventory refreshed.' : 'Settings saved.');
     } catch (err) {
+      Logger.error('Failed to save settings', err, { 
+        hasJobTypes: Array.isArray(jobTypes),
+        csvUrl: csvUrl?.substring(0, 50) // Log partial URL
+      });
       alert('Failed to save settings: ' + (err.response?.data?.error || err.message));
     } finally {
       setSaving(false);

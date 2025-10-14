@@ -1,5 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+// Logging utility
+const Logger = {
+  error: (message, error, context = {}) => {
+    console.error(`[VinScanner Error] ${message}:`, {
+      error: error?.message || error,
+      stack: error?.stack,
+      timestamp: new Date().toISOString(),
+      context
+    });
+  }
+};
+
 // Lightweight VIN-friendly scanner that supports QR, Code39, and Code128.
 // Prefers native BarcodeDetector; falls back to ZXing library loaded dynamically.
 export default function VinScanner({ onScanSuccess }) {
@@ -113,7 +125,10 @@ export default function VinScanner({ onScanSuccess }) {
                     await startZXing();
                 }
             } catch (e) {
-                console.error(e);
+                Logger.error('Camera access or scanning initialization failed', e, { 
+                    videoRef: !!videoRef.current,
+                    canvasRef: !!canvasRef.current
+                });
                 setError('Camera access or scanning failed. Check permissions.');
             }
         };

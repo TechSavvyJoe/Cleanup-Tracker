@@ -4,6 +4,18 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+// Logging utility
+const Logger = {
+  error: (message, error, context = {}) => {
+    console.error(`[SimpleReports Error] ${message}:`, {
+      error: error?.message || error,
+      stack: error?.stack,
+      timestamp: new Date().toISOString(),
+      context
+    });
+  }
+};
+
 const SimpleReports = ({ jobs, users, theme }) => {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,7 +50,7 @@ const SimpleReports = ({ jobs, users, theme }) => {
         console.log('Transformed data:', transformedData);
         setReportData(transformedData);
       } catch (error) {
-        console.error('Failed to load report data:', error);
+        Logger.error('Failed to load report data', error, { endpoint: '/api/v2/reports' });
         // Fallback to calculate from props
         const jobStats = jobs.reduce((acc, job) => {
           acc[job.status] = (acc[job.status] || 0) + 1;
@@ -217,7 +229,7 @@ const SimpleReports = ({ jobs, users, theme }) => {
       const blob = new Blob([excelBuffer], { type: 'application/octet-stream' });
       saveAs(blob, `${getExportFileBase()}.xlsx`);
     } catch (error) {
-      console.error('Failed to export Excel report:', error);
+      Logger.error('Failed to export Excel report', error, { format: 'xlsx' });
       alert('Unable to export Excel report right now. Please try again.');
     }
   };
@@ -316,7 +328,7 @@ const SimpleReports = ({ jobs, users, theme }) => {
       drawFooters();
       doc.save(`${getExportFileBase()}.pdf`);
     } catch (error) {
-      console.error('Failed to export PDF report:', error);
+      Logger.error('Failed to export PDF report', error, { format: 'pdf' });
       alert('Unable to export PDF report right now. Please try again.');
     }
   };

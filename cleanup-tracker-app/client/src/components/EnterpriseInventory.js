@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { v2Request } from '../utils/v2Client';
 
+// Logging utility
+const Logger = {
+  error: (message, error, context = {}) => {
+    console.error(`[EnterpriseInventory Error] ${message}:`, {
+      error: error?.message || error,
+      stack: error?.stack,
+      timestamp: new Date().toISOString(),
+      context
+    });
+  }
+};
+
 const EnterpriseInventory = ({ theme = 'dark' }) => {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +38,9 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
         });
 
         const payload = response?.data;
-        if (!isActive) return;
+        if (!isActive) {
+          return;
+        }
 
         if (Array.isArray(payload)) {
           setVehicles(payload);
@@ -36,8 +50,10 @@ const EnterpriseInventory = ({ theme = 'dark' }) => {
           throw new Error('Invalid response format');
         }
       } catch (err) {
-        if (!isActive) return;
-        console.error('Failed to load vehicles:', err);
+        if (!isActive) {
+          return;
+        }
+        Logger.error('Failed to load vehicles', err, { endpoint: '/vehicles' });
         setError(err.message || 'Failed to load vehicles');
       } finally {
         if (isActive) {
