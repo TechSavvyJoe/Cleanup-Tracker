@@ -115,8 +115,7 @@ export const PerformanceChart = ({ data = [], height = 300, title, showGrid = tr
       <div className="relative">
         <canvas 
           ref={canvasRef}
-          style={{ width: '100%', height: `${height}px` }}
-          className="rounded-lg"
+          className="w-full h-full rounded-lg"
         />
         {hoveredPoint && (
           <div className="absolute bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg pointer-events-none">
@@ -174,10 +173,10 @@ export const BarChart = ({ data = [], height = 300, horizontal = false, color = 
 
   return (
     <GlassCard className="p-6">
-      <div className="flex items-end justify-around space-x-2" style={{ height: `${height}px` }}>
+      <div className="flex items-end justify-around space-x-2 h-full">
         {animatedData.map((item, index) => (
           <div key={index} className="flex-1 flex flex-col items-center justify-end space-y-2">
-            <div className="relative w-full flex items-end justify-center" style={{ height: `${height - 40}px` }}>
+            <div className="relative w-full flex items-end justify-center h-full">
               {showValues && (
                 <span className="absolute -top-6 text-sm font-medium text-gray-700 dark:text-gray-300">
                   {item.value}
@@ -332,12 +331,13 @@ export const Heatmap = ({ data = [], width = 800, cellSize = 12, monthLabels = t
   const maxValue = Math.max(...data.map(d => d.value), 1);
 
   const getColor = (value) => {
-    if (value === 0) return '#ebedf0';
+    if (value === 0) return 'bg-gray-100';
     const intensity = Math.min(value / maxValue, 1);
-    const hue = 142; // Green
-    const saturation = 52;
-    const lightness = 90 - intensity * 40;
-    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    if (intensity > 0.8) return 'bg-green-700';
+    if (intensity > 0.6) return 'bg-green-600';
+    if (intensity > 0.4) return 'bg-green-500';
+    if (intensity > 0.2) return 'bg-green-400';
+    return 'bg-green-300';
   };
 
   return (
@@ -372,8 +372,7 @@ export const Heatmap = ({ data = [], width = 800, cellSize = 12, monthLabels = t
                     width={cellSize}
                     height={cellSize}
                     rx={2}
-                    fill={getColor(cell.value)}
-                    className="cursor-pointer transition-all duration-200 hover:stroke-gray-400 hover:stroke-2"
+                    className={`cursor-pointer transition-all duration-200 hover:stroke-gray-400 hover:stroke-2 ${getColor(cell.value)}`}
                     onMouseEnter={() => setHoveredCell(cell)}
                     onMouseLeave={() => setHoveredCell(null)}
                   />

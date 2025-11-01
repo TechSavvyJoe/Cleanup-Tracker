@@ -1,88 +1,15 @@
+
 const express = require('express');
 const router = express.Router();
-const V2User = require('../models/V2User');
-const Job = require('../models/Job');
-const Vehicle = require('../models/Vehicle');
-const axios = require('axios');
-const csv = require('csv-parser');
-const jwt = require('jsonwebtoken');
-const settingsStore = require('../utils/settingsStore');
-const { fetchAndImportInventory } = require('../utils/inventory');
+const Job = require('../../models/Job');
+const V2User = require('../../models/V2User');
 const {
-  getInventoryCsvUrl,
-  setInventoryCsvUrl,
-  DEFAULT_INVENTORY_CSV_URL
-} = require('../utils/inventorySource');
-const { jobToResponse } = require('../utils/jobs');
-
-const ACCESS_TOKEN_TTL = process.env.JWT_ACCESS_EXPIRATION || '15m';
-const REFRESH_TOKEN_TTL = process.env.JWT_REFRESH_EXPIRATION || '7d';
-
-
-
-
-
-// Health check endpoint
-router.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'V2 API is running', timestamp: new Date().toISOString() });
-});
-
-// Login endpoint
-router.post('/auth/login', async (req, res) => {
-  try {
-    const { pin } = req.body;
-    if (!pin) {
-      return res.status(400).json({ error: 'PIN is required' });
-    }
-
-    // Find user by PIN
-    const user = await V2User.findOne({ pin: pin.toString() });
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid PIN' });
-    }
-
-    // Generate JWT tokens
-    const accessToken = jwt.sign(
-      { id: user._id, role: user.role, name: user.name },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: ACCESS_TOKEN_TTL }
-    );
-
-    const refreshToken = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: REFRESH_TOKEN_TTL }
-    );
-
-    res.json({
-      user: {
-        id: String(user._id),
-        name: user.name,
-        role: user.role,
-        pin: user.pin,
-        employeeNumber: user.employeeNumber,
-        phoneNumber: user.phoneNumber
-      },
-      tokens: {
-        accessToken,
-        refreshToken
-      }
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-const { SERVICE_EXPECTATIONS } = require('../config/services');
-
-// Get service expectations
-router.get('/service-expectations', (req, res) => {
-  res.json(SERVICE_EXPECTATIONS);
-});
+  jobToResponse,
+  computeJobDuration
+} = require('../../utils/jobs');
 
 // Update existing jobs with vehicle details
-router.post('/jobs/populate-vehicle-details', async (req, res) => {
+router.post('/populate-vehicle-details', async (req, res) => {
   try {
     const jobs = await Job.find({
       $or: [
@@ -118,246 +45,8 @@ router.post('/jobs/populate-vehicle-details', async (req, res) => {
   }
 });
 
-// Reports endpoint with proper time calculations
-router.get('/reports', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    
-    // Build date filter
-    let dateFilter = {};
-    if (startDate || endDate) {
-      dateFilter.date = {};
-      if (startDate) dateFilter.date.$gte = startDate;
-      if (endDate) dateFilter.date.$lte = endDate;
-    }
-    
-    // Get all jobs for the period
-    const allJobs = await Job.find(dateFilter).sort({ startTime: -1 });
-    const completedJobs = allJobs.filter(job => job.status === 'Completed' && job.duration > 0);
-    
-    // Calculate period totals
-    const periodTotal = allJobs.length;
-    const completed = completedJobs.length;
-    const completionRate = periodTotal > 0 ? Math.round((completed / periodTotal) * 100) : 0;
-    
-    // Calculate last 7 days (for comparison)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const last7Days = await Job.countDocuments({
-      createdAt: { $gte: sevenDaysAgo }
-    });
-    
-    // Calculate detailer performance
-    const detailerStats = {};
-    const serviceTypeStats = {};
-    
-    completedJobs.forEach(job => {
-      // Detailer performance
-      const techName = job.technicianName || 'Unknown';
-      if (!detailerStats[techName]) {
-        detailerStats[techName] = {
-          name: techName,
-          totalJobs: 0,
-          totalTime: 0,
-          minTime: Infinity,
-          maxTime: 0,
-          recentJobs: 0
-        };
-      }
-      
-      detailerStats[techName].totalJobs++;
-      detailerStats[techName].totalTime += job.duration || 0;
-      detailerStats[techName].minTime = Math.min(detailerStats[techName].minTime, job.duration || 0);
-      detailerStats[techName].maxTime = Math.max(detailerStats[techName].maxTime, job.duration || 0);
-      
-      // Count recent jobs (last 7 days)
-      const jobDate = new Date(job.createdAt || job.startTime);
-      if (jobDate >= sevenDaysAgo) {
-        detailerStats[techName].recentJobs++;
-      }
-      
-      // Service type performance
-      const serviceType = job.serviceType || 'Unknown';
-      if (!serviceTypeStats[serviceType]) {
-        serviceTypeStats[serviceType] = {
-          jobs: 0,
-          totalTime: 0,
-          avgTime: 0,
-          minTime: Infinity,
-          maxTime: 0
-        };
-      }
-      
-      serviceTypeStats[serviceType].jobs++;
-      serviceTypeStats[serviceType].totalTime += job.duration || 0;
-      serviceTypeStats[serviceType].minTime = Math.min(serviceTypeStats[serviceType].minTime, job.duration || 0);
-      serviceTypeStats[serviceType].maxTime = Math.max(serviceTypeStats[serviceType].maxTime, job.duration || 0);
-    });
-    
-    // Format detailer performance with proper averages
-    const detailerPerformance = Object.values(detailerStats).map(stat => ({
-      name: stat.name,
-      totalJobs: stat.totalJobs,
-      avgTime: stat.totalJobs > 0 ? Math.round(stat.totalTime / stat.totalJobs) : 0,
-      minTime: stat.minTime === Infinity ? 0 : stat.minTime,
-      maxTime: stat.maxTime,
-      recentJobs: stat.recentJobs
-    }));
-    
-    // Format service type performance
-    const serviceTypes = Object.entries(serviceTypeStats).map(([type, stat]) => ({
-      name: type,
-      jobs: stat.jobs,
-      avgTime: stat.jobs > 0 ? Math.round(stat.totalTime / stat.jobs) : 0,
-      minTime: stat.minTime === Infinity ? 0 : stat.minTime,
-      maxTime: stat.maxTime
-    }));
-    
-    // Calculate daily trends (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const recentJobs = await Job.find({
-      createdAt: { $gte: thirtyDaysAgo }
-    });
-    
-    const dailyTrends = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const dayJobs = recentJobs.filter(job => {
-        const jobDate = new Date(job.createdAt || job.startTime);
-        return jobDate.toISOString().split('T')[0] === dateStr;
-      });
-      
-      const dayCompleted = dayJobs.filter(job => job.status === 'Completed');
-      const completionPct = dayJobs.length > 0 ? Math.round((dayCompleted.length / dayJobs.length) * 100) : 0;
-      
-      dailyTrends.push({
-        date: dateStr,
-        jobs: dayJobs.length,
-        completed: dayCompleted.length,
-        completionRate: completionPct
-      });
-    }
-    
-    res.json({
-      periodTotal,
-      completed,
-      completionRate,
-      last7Days,
-      detailerPerformance,
-      serviceTypes,
-      dailyTrends
-    });
-  } catch (error) {
-    console.error('Reports error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Settings minimal API used by client
-router.get('/settings', async (req, res) => {
-  const siteTitle = settingsStore.get('siteTitle') || 'Cleanup Tracker';
-  const inventoryCsvUrl = getInventoryCsvUrl() || DEFAULT_INVENTORY_CSV_URL;
-  res.json({ siteTitle, inventoryCsvUrl });
-});
-
-
-
-// Seed initial users if none
-router.post('/seed-users', async (req, res) => {
-  try {
-    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_V2_SEED !== 'true') {
-      return res.status(403).json({ error: 'Seeding disabled in production' });
-    }
-
-    const count = await V2User.countDocuments();
-    if (count > 0) {
-      return res.json({ seeded: false, count });
-    }
-
-    const seedUsers = [
-      { username: 'manager', name: 'Joe Gallant', role: 'manager', password: 'password', pin: '1701', employeeNumber: 'MGR001', phoneNumber: '555-0001' },
-      { pin: '1716', name: 'Alfred', role: 'detailer', uid: 'detailer-001', employeeNumber: 'DET001', phoneNumber: '555-0002' },
-      { pin: '1709', name: 'Brian', role: 'detailer', uid: 'detailer-002', employeeNumber: 'DET002', phoneNumber: '555-0003' },
-      { pin: '2001', name: 'Sarah Johnson', role: 'salesperson', employeeNumber: 'SALES001', phoneNumber: '555-0101' },
-      { pin: '2002', name: 'Mike Chen', role: 'salesperson', employeeNumber: 'SALES002', phoneNumber: '555-0102' },
-      { pin: '2003', name: 'Lisa Rodriguez', role: 'salesperson', employeeNumber: 'SALES003', phoneNumber: '555-0103' }
-    ];
-
-    for (const seed of seedUsers) {
-      const { pin: seedPin, password, username, ...rest } = seed;
-      const user = new V2User({
-        ...rest,
-        username: username ? username.toLowerCase() : undefined
-      });
-      if (seedPin) user.pin = seedPin;
-      if (password) user.password = password;
-      await user.save();
-    }
-
-    const newCount = await V2User.countDocuments();
-    res.json({ seeded: true, count: newCount });
-  } catch (error) {
-    console.error('Seed users error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Middleware to authenticate JWT tokens
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
-    if (err) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
-// router.use(authenticateToken);  // Commented - auth handled per-endpoint
-
-// Diagnostic endpoints (secured)
-router.get('/diag', async (req, res) => {
-  const users = await V2User.find();
-  res.json({
-    message: 'V2 API active',
-    users: users.map(sanitizeUser)
-  });
-});
-
-router.put('/settings', async (req, res) => {
-  const { key, value } = req.body || {};
-  if (!key) return res.status(400).json({ error: 'key required' });
-  try {
-    if (key === 'inventoryCsvUrl') {
-      if (!value) {
-        return res.status(400).json({ error: 'Inventory CSV URL required' });
-      }
-      await setInventoryCsvUrl(value);
-    } else {
-      await settingsStore.set(key, value);
-    }
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-  res.json({ ok: true });
-});
-
-
-
 // Jobs
-router.get('/jobs', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const jobs = await Job.find().sort({ startTime: -1 });
     res.json(jobs.map(jobToResponse));
@@ -367,7 +56,7 @@ router.get('/jobs', async (req, res) => {
   }
 });
 
-router.post('/jobs', async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       technicianId, technicianName, vin, stockNumber, vehicleDescription,
@@ -421,7 +110,7 @@ router.post('/jobs', async (req, res) => {
   }
 });
 
-router.put('/jobs/:id/complete', async (req, res) => {
+router.put('/:id/complete', async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -458,11 +147,11 @@ async function handlePauseJob(req, res) {
 }
 
 // Pause job
-router.put('/jobs/:id/pause', handlePauseJob);
-router.post('/jobs/:id/pause', handlePauseJob);
+router.put('/:id/pause', handlePauseJob);
+router.post('/:id/pause', handlePauseJob);
 
 // Resume job
-router.put('/jobs/:id/resume', async (req, res) => {
+router.put('/:id/resume', async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -509,10 +198,10 @@ async function handleAddTechnician(req, res) {
 }
 
 // Add technician to job
-router.put('/jobs/:id/add-technician', handleAddTechnician);
-router.post('/jobs/:id/add-technician', handleAddTechnician);
+router.put('/:id/add-technician', handleAddTechnician);
+router.post('/:id/add-technician', handleAddTechnician);
 
-router.put('/jobs/:id/status', async (req, res) => {
+router.put('/:id/status', async (req, res) => {
   const { status, qcNotes, pauseReason } = req.body || {};
   if (!status || typeof status !== 'string') {
     return res.status(400).json({ error: 'status required' });
@@ -662,8 +351,8 @@ async function handleQcCompletion(req, res) {
 }
 
 // Complete QC
-router.put('/jobs/:id/qc-complete', handleQcCompletion);
-router.post('/jobs/:id/qc', handleQcCompletion);
+router.put('/:id/qc-complete', handleQcCompletion);
+router.post('/:id/qc', handleQcCompletion);
 
 // Communication endpoints
 async function handleSendMessage(req, res) {
@@ -701,17 +390,17 @@ async function handleSendMessage(req, res) {
   });
 }
 
-router.post('/jobs/:id/send-message', handleSendMessage);
-router.post('/jobs/:id/message', handleSendMessage);
+router.post('/:id/send-message', handleSendMessage);
+router.post('/:id/message', handleSendMessage);
 
 // Get job communications
-router.get('/jobs/:id/messages', async (req, res) => {
+router.get('/:id/messages', async (req, res) => {
   // In future, retrieve message history from database
   res.json({ messages: [] });
 });
 
 // Additional job endpoints used by client UI
-router.get('/jobs/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   // Minimal details/events structure expected by UI
@@ -726,7 +415,7 @@ router.get('/jobs/:id', async (req, res) => {
   });
 });
 
-router.patch('/jobs/:id', async (req, res) => {
+router.patch('/:id', async (req, res) => {
   const allowed = ['priority', 'salesPerson'];
   const updates = {};
   allowed.forEach(k => { if (req.body[k] != null) updates[k] = req.body[k]; });
@@ -735,7 +424,7 @@ router.patch('/jobs/:id', async (req, res) => {
   res.json(jobToResponse(job));
 });
 
-router.put('/jobs/:id/start', async (req, res) => {
+router.put('/:id/start', async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   job.startTime = job.startTime || new Date();
@@ -744,46 +433,20 @@ router.put('/jobs/:id/start', async (req, res) => {
   res.json(jobToResponse(job));
 });
 
-router.put('/jobs/:id/stop', async (req, res) => {
+router.put('/:id/stop', async (req, res) => {
   // Treat stop as a no-op for now (could add pause later)
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   res.json(jobToResponse(job));
 });
 
-router.put('/jobs/:id/join', async (req, res) => {
+router.put('/:id/join', async (req, res) => {
   const { userId } = req.body || {};
   const job = await Job.findById(req.params.id);
   if (!job) return res.status(404).json({ error: 'Not found' });
   if (userId && !job.assignedTechnicianIds.includes(userId)) job.assignedTechnicianIds.push(userId);
   await job.save();
   res.json(jobToResponse(job));
-});
-
-
-
-
-
-router.post('/vehicles/refresh', async (req, res) => {
-  try {
-    await fetchAndImportInventory();
-    res.json({ success: true, message: 'Inventory refresh started.' });
-  } catch (e) {
-    console.error('Refresh inventory failed:', e);
-    res.status(500).json({ success: false, message: e.message });
-  }
-});
-
-// Allow setting CSV URL via API for future imports
-router.post('/vehicles/set-csv', async (req, res) => {
-  const { url } = req.body || {};
-  if (!url) return res.status(400).json({ error: 'url required' });
-  try {
-    const normalized = await setInventoryCsvUrl(url);
-    res.json({ ok: true, url: normalized });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
 });
 
 module.exports = router;

@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import axios from 'axios';
 import './index.css';
+import './styles/animations.css';
 import './styles/modern-responsive.css';
 import './styles/compact-improvements.css';
 import './styles/premium.css';

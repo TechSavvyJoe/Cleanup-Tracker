@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Spinner } from '../ui/EnterpriseComponents';
 
 // ============================================================================
@@ -17,7 +18,6 @@ export const Sidebar = ({
   onLogout,
   items = [],
   activeItem,
-  onItemClick,
 }) => {
   return (
     <>
@@ -70,12 +70,10 @@ export const Sidebar = ({
         {/* Navigation Items */}
         <nav className="p-4 space-y-2">
           {items.map((item) => (
-            <button
+            <Link
               key={item.id}
-              onClick={() => {
-                onItemClick?.(item.id);
-                onClose?.();
-              }}
+              to={`/${item.id}`}
+              onClick={onClose}
               className={`
                 w-full flex items-center gap-3 px-4 py-3 rounded-lg
                 transition-all duration-200 font-medium
@@ -92,7 +90,7 @@ export const Sidebar = ({
                   {item.badge}
                 </span>
               )}
-            </button>
+            </Link>
           ))}
         </nav>
 
@@ -175,7 +173,6 @@ export const Header = ({
 export const MainLayout = ({
   user,
   currentPage,
-  onPageChange,
   onLogout,
   children,
   isLoading = false,
@@ -201,10 +198,6 @@ export const MainLayout = ({
         onLogout={onLogout}
         items={navigationItems}
         activeItem={currentPage}
-        onItemClick={(id) => {
-          onPageChange?.(id);
-          setSidebarOpen(false);
-        }}
       />
 
       {/* Main Content */}

@@ -18,9 +18,11 @@ import {
   EmptyState,
   Spinner,
 } from '../components/ui/EnterpriseComponents';
+import { useNotification } from '../components/ui/NotificationSystem';
 import { V2 } from '../utils/v2Client';
 
 export const EnterpriseJobManager = ({ user }) => {
+  const { addNotification } = useNotification();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -64,6 +66,12 @@ export const EnterpriseJobManager = ({ user }) => {
       });
       setJobs([response.data, ...jobs]);
       setIsModalOpen(false);
+      addNotification({
+        type: 'success',
+        title: 'Job Created',
+        message: `Job "${formData.vehicleDescription}" created successfully`,
+        duration: 5000,
+      });
       setFormData({
         technicianName: user?.name || '',
         vin: '',
@@ -73,6 +81,12 @@ export const EnterpriseJobManager = ({ user }) => {
         salesPerson: '',
       });
     } catch (err) {
+      addNotification({
+        type: 'error',
+        title: 'Creation Failed',
+        message: 'Failed to create job. Please try again.',
+        duration: 5000,
+      });
       setError('Failed to create job');
     }
   };
@@ -83,7 +97,19 @@ export const EnterpriseJobManager = ({ user }) => {
         status: newStatus,
       });
       setJobs(jobs.map((j) => (j.id === jobId ? response.data : j)));
+      addNotification({
+        type: 'success',
+        title: 'Status Updated',
+        message: `Job status changed to "${newStatus}"`,
+        duration: 5000,
+      });
     } catch (err) {
+      addNotification({
+        type: 'error',
+        title: 'Update Failed',
+        message: 'Failed to update job status. Please try again.',
+        duration: 5000,
+      });
       setError('Failed to update job status');
     }
   };

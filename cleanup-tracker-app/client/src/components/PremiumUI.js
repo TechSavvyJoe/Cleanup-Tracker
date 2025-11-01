@@ -86,7 +86,7 @@ export const ProgressRing = ({ progress = 0, size = 120, strokeWidth = 8, color 
  * SKELETON LOADER
  * Shimmer loading effect for better perceived performance
  */
-export const SkeletonLoader = ({ variant = 'text', width = '100%', height = '20px', className = '' }) => {
+export const SkeletonLoader = ({ variant = 'text', width, height, className = '' }) => {
   const variants = {
     text: 'h-4 rounded',
     title: 'h-8 rounded',
@@ -94,6 +94,10 @@ export const SkeletonLoader = ({ variant = 'text', width = '100%', height = '20p
     rectangle: 'rounded-lg',
     card: 'h-48 rounded-2xl'
   };
+
+  const style = {};
+  if (width) style.width = width;
+  if (height) style.height = height;
 
   return (
     <div 
@@ -103,7 +107,7 @@ export const SkeletonLoader = ({ variant = 'text', width = '100%', height = '20p
         ${variants[variant]}
         ${className}
       `}
-      style={{ width, height }}
+      style={style}
     />
   );
 };
@@ -448,20 +452,7 @@ export const Tooltip = ({ children, content, position = 'top' }) => {
   );
 };
 
-// Add shimmer animation to global styles
-if (typeof document !== 'undefined') {
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
-    }
-    .animate-shimmer {
-      animation: shimmer 2s infinite linear;
-    }
-  `;
-  document.head.appendChild(style);
-}
+
 
 const PremiumUIComponents = {
   GlassCard,

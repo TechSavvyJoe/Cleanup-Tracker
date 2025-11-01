@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ModernTheme } from '../styles/ModernDesignSystem';
 import { PerformanceChart, BarChart, DonutChart, Heatmap } from './DataVisualization';
 
 // Enhanced Reports Component with Advanced Features
@@ -14,7 +13,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
   const [exportFormat, setExportFormat] = useState('csv');
   const [isExporting, setIsExporting] = useState(false);
 
-  const currentTheme = theme === 'dark' ? ModernTheme.dark : ModernTheme.light;
+
 
   // Calculate date range
   const getDateRange = () => {
@@ -156,51 +155,24 @@ const EnhancedReports = ({ jobs, users, theme }) => {
     }));
 
   return (
-    <div style={{
-      padding: '1.5rem',
-      maxWidth: '100%',
-      margin: '0 auto',
-    }}>
+    <div className="p-6 max-w-full mx-auto">
       {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '2rem',
-        flexWrap: 'wrap',
-        gap: '1rem',
-      }}>
+      <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
         <div>
-          <h1 style={{
-            margin: 0,
-            fontSize: ModernTheme.typography.fontSize['3xl'],
-            fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: currentTheme.text.primary,
-          }}>
+          <h1 className="m-0 text-3xl font-bold text-gray-900 dark:text-white">
             📊 Advanced Reports
           </h1>
-          <p style={{
-            margin: '0.5rem 0 0 0',
-            fontSize: ModernTheme.typography.fontSize.sm,
-            color: currentTheme.text.secondary,
-          }}>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
             Comprehensive analytics and insights
           </p>
         </div>
 
         {/* Export Button */}
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="flex gap-3 items-center">
           <select
             value={exportFormat}
             onChange={(e) => setExportFormat(e.target.value)}
-            style={{
-              padding: '0.75rem 1rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: `1px solid ${currentTheme.border.default}`,
-              backgroundColor: currentTheme.background.secondary,
-              color: currentTheme.text.primary,
-              fontSize: ModernTheme.typography.fontSize.sm,
-            }}
+            className="p-3 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
           >
             <option value="csv">CSV</option>
             <option value="pdf">PDF</option>
@@ -209,18 +181,7 @@ const EnhancedReports = ({ jobs, users, theme }) => {
           <button
             onClick={handleExport}
             disabled={isExporting}
-            style={{
-              padding: '0.75rem 1.5rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: 'none',
-              backgroundColor: ModernTheme.colors.primary[500],
-              color: '#fff',
-              fontSize: ModernTheme.typography.fontSize.sm,
-              fontWeight: ModernTheme.typography.fontWeight.medium,
-              cursor: isExporting ? 'not-allowed' : 'pointer',
-              opacity: isExporting ? 0.6 : 1,
-              transition: ModernTheme.transition.fast,
-            }}
+            className="py-3 px-6 rounded-lg border-none bg-blue-500 text-white text-sm font-medium cursor-pointer hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {isExporting ? '⏳ Exporting...' : '📥 Export Report'}
           </button>
@@ -228,41 +189,16 @@ const EnhancedReports = ({ jobs, users, theme }) => {
       </div>
 
       {/* Filters Bar */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '1rem',
-        marginBottom: '2rem',
-        padding: '1.5rem',
-        borderRadius: ModernTheme.borderRadius.xl,
-        backgroundColor: currentTheme.background.secondary,
-        border: `1px solid ${currentTheme.border.default}`,
-      }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-6 rounded-xl bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
         {/* Date Range */}
         <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '0.5rem',
-            fontSize: ModernTheme.typography.fontSize.xs,
-            fontWeight: ModernTheme.typography.fontWeight.medium,
-            color: currentTheme.text.secondary,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}>
+          <label className="block mb-2 text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
             Date Range
           </label>
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: `1px solid ${currentTheme.border.default}`,
-              backgroundColor: currentTheme.background.primary,
-              color: currentTheme.text.primary,
-              fontSize: ModernTheme.typography.fontSize.sm,
-            }}
+            className="w-full p-3 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
           >
             <option value="24h">Last 24 Hours</option>
             <option value="7d">Last 7 Days</option>
@@ -275,29 +211,13 @@ const EnhancedReports = ({ jobs, users, theme }) => {
 
         {/* Status Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '0.5rem',
-            fontSize: ModernTheme.typography.fontSize.xs,
-            fontWeight: ModernTheme.typography.fontWeight.medium,
-            color: currentTheme.text.secondary,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}>
+          <label className="block mb-2 text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
             Status
           </label>
           <select
             value={filters.status}
             onChange={(e) => setFilters({...filters, status: e.target.value})}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: `1px solid ${currentTheme.border.default}`,
-              backgroundColor: currentTheme.background.primary,
-              color: currentTheme.text.primary,
-              fontSize: ModernTheme.typography.fontSize.sm,
-            }}
+            className="w-full p-3 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
           >
             <option value="all">All Status</option>
             <option value="pending">Pending</option>
@@ -308,29 +228,13 @@ const EnhancedReports = ({ jobs, users, theme }) => {
 
         {/* Assignee Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '0.5rem',
-            fontSize: ModernTheme.typography.fontSize.xs,
-            fontWeight: ModernTheme.typography.fontWeight.medium,
-            color: currentTheme.text.secondary,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}>
+          <label className="block mb-2 text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
             Assigned To
           </label>
           <select
             value={filters.assignedTo}
             onChange={(e) => setFilters({...filters, assignedTo: e.target.value})}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: `1px solid ${currentTheme.border.default}`,
-              backgroundColor: currentTheme.background.primary,
-              color: currentTheme.text.primary,
-              fontSize: ModernTheme.typography.fontSize.sm,
-            }}
+            className="w-full p-3 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
           >
             <option value="all">All Users</option>
             {users && users.map(user => (
@@ -343,29 +247,13 @@ const EnhancedReports = ({ jobs, users, theme }) => {
 
         {/* Metric View */}
         <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '0.5rem',
-            fontSize: ModernTheme.typography.fontSize.xs,
-            fontWeight: ModernTheme.typography.fontWeight.medium,
-            color: currentTheme.text.secondary,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}>
+          <label className="block mb-2 text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
             View
           </label>
           <select
             value={selectedMetric}
             onChange={(e) => setSelectedMetric(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              borderRadius: ModernTheme.borderRadius.lg,
-              border: `1px solid ${currentTheme.border.default}`,
-              backgroundColor: currentTheme.background.primary,
-              color: currentTheme.text.primary,
-              fontSize: ModernTheme.typography.fontSize.sm,
-            }}
+            className="w-full p-3 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
           >
             <option value="overview">Overview</option>
             <option value="performance">Performance</option>
@@ -376,143 +264,63 @@ const EnhancedReports = ({ jobs, users, theme }) => {
       </div>
 
       {/* Key Metrics Cards */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-        gap: '1rem',
-        marginBottom: '2rem',
-      }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         {/* Total Jobs */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize.sm,
-            color: currentTheme.text.secondary,
-            marginBottom: '0.5rem',
-          }}>
+        <div className="p-6 rounded-xl bg-white border border-gray-200 shadow-md dark:bg-gray-800 dark:border-gray-700">
+          <div className="text-sm text-gray-500 mb-2 dark:text-gray-400">
             Total Jobs
           </div>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize['3xl'],
-            fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: currentTheme.text.primary,
-          }}>
+          <div className="text-3xl font-bold text-gray-900 dark:text-white">
             {metrics.total}
           </div>
         </div>
 
         {/* Average Time per Job */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize.sm,
-            color: currentTheme.text.secondary,
-            marginBottom: '0.5rem',
-          }}>
+        <div className="p-6 rounded-xl bg-white border border-gray-200 shadow-md dark:bg-gray-800 dark:border-gray-700">
+          <div className="text-sm text-gray-500 mb-2 dark:text-gray-400">
             Avg. Job Time
           </div>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize['3xl'],
-            fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: ModernTheme.colors.info[500],
-          }}>
+          <div className="text-3xl font-bold text-blue-500">
             {metrics.avgTime}m
           </div>
         </div>
 
         {/* Total Time Tracked */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize.sm,
-            color: currentTheme.text.secondary,
-            marginBottom: '0.5rem',
-          }}>
+        <div className="p-6 rounded-xl bg-white border border-gray-200 shadow-md dark:bg-gray-800 dark:border-gray-700">
+          <div className="text-sm text-gray-500 mb-2 dark:text-gray-400">
             Total Hours Tracked
           </div>
-          <div style={{
-            fontSize: ModernTheme.typography.fontSize['3xl'],
-            fontWeight: ModernTheme.typography.fontWeight.bold,
-            color: ModernTheme.colors.purple[500],
-          }}>
+          <div className="text-3xl font-bold text-purple-500">
             {(metrics.totalMinutes / 60).toFixed(1)}h
           </div>
         </div>
       </div>
 
       {/* Charts Section */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-        gap: '1.5rem',
-      }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Status Distribution */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <h3 style={{
-            margin: '0 0 1.5rem 0',
-            fontSize: ModernTheme.typography.fontSize.lg,
-            fontWeight: ModernTheme.typography.fontWeight.semibold,
-            color: currentTheme.text.primary,
-          }}>
+        <div className="p-6 rounded-xl bg-white border border-gray-200 shadow-md dark:bg-gray-800 dark:border-gray-700">
+          <h3 className="m-0 mb-6 text-lg font-semibold text-gray-900 dark:text-white">
             Status Distribution
           </h3>
           <DonutChart data={statusChartData} width={350} height={300} />
         </div>
 
         {/* Performance Trend */}
-        <div style={{
-          padding: '1.5rem',
-          borderRadius: ModernTheme.borderRadius.xl,
-          backgroundColor: currentTheme.background.elevated,
-          border: `1px solid ${currentTheme.border.default}`,
-          boxShadow: currentTheme.shadow.md,
-        }}>
-          <h3 style={{
-            margin: '0 0 1.5rem 0',
-            fontSize: ModernTheme.typography.fontSize.lg,
-            fontWeight: ModernTheme.typography.fontWeight.semibold,
-            color: currentTheme.text.primary,
-          }}>
+        <div className="p-6 rounded-xl bg-white border border-gray-200 shadow-md dark:bg-gray-800 dark:border-gray-700">
+          <h3 className="m-0 mb-6 text-lg font-semibold text-gray-900 dark:text-white">
             Performance Trend
           </h3>
           <PerformanceChart
             data={performanceData}
             width={350}
             height={250}
-            color={ModernTheme.colors.primary[500]}
+            color="#3B82F6"
           />
         </div>
       </div>
 
-      {/* Responsive Mobile Styles */}
-      <style>{`
-        @media (max-width: 640px) {
-          [style*="gridTemplateColumns"] {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      `}</style>
+
     </div>
   );
 };

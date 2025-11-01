@@ -22,8 +22,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'"],
+      scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
       fontSrc: ["'self'", "data:"]
     }
@@ -122,6 +122,10 @@ async function connectDb() {
 
 // Health check endpoint for deployment platforms
 app.get('/api/health', (req, res) => {
+  const token = req.headers['x-health-check-token'];
+  if (process.env.NODE_ENV === 'production' && token !== process.env.HEALTH_CHECK_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -230,39 +234,4 @@ function startServer(portToTry) {
 
 // startServer is invoked from main() after DB connection
 
-// Import Google Sheets inventory CSV at startup
-const csv = require('csv-parser');
-async function fetchAndImportInventory() {
-  const SHEET_URL = getInventoryCsvUrl();
-  console.log('Fetching inventory CSV from', SHEET_URL);
-  const response = await axios.get(SHEET_URL, { responseType: 'stream' });
-  const headerMap = {
-    0: 'newUsed', 1: 'stockNumber', 2: 'vehicle', 3: 'year', 4: 'make', 5: 'model',
-    6: 'body', 7: 'drivetrain', 8: 'color', 9: 'odometer', 10: 'price', 11: 'age', 12: 'vin', 13: 'tags', 14: 'status'
-  };
-  const rows = [];
-  await new Promise((resolve, reject) => {
-    response.data
-      .pipe(csv({ mapHeaders: ({ header, index }) => headerMap[index] || null }))
-      .on('data', (row) => rows.push(row))
-      .on('error', reject)
-      .on('end', resolve);
-  });
-  if (!rows.length) { console.warn('Inventory CSV empty.'); return; }
-  const cleanInt = (v) => { const n = parseInt(String(v || '').replace(/[^0-9-]/g, ''), 10); return Number.isNaN(n) ? null : n; };
-  const cleanStr = (v) => (v == null ? '' : String(v).trim());
-  const cleanPrice = (v) => (v == null ? '' : String(v).replace(/[^0-9.]/g, '').trim());
-  const ops = rows.filter(r => cleanStr(r.vin) && cleanStr(r.stockNumber)).map(r => {
-    const doc = {
-      newUsed: cleanStr(r.newUsed), stockNumber: cleanStr(r.stockNumber), vehicle: cleanStr(r.vehicle),
-      year: cleanInt(r.year), make: cleanStr(r.make), model: cleanStr(r.model), body: cleanStr(r.body),
-      drivetrain: cleanStr(r.drivetrain), color: cleanStr(r.color), odometer: cleanStr(r.odometer), price: cleanPrice(r.price),
-      age: cleanInt(r.age), vin: cleanStr(r.vin), tags: cleanStr(r.tags), status: cleanStr(r.status)
-    };
-    return { updateOne: { filter: { vin: doc.vin }, update: { $set: doc }, upsert: true } };
-  });
-  if (!ops.length) { console.warn('No VIN rows found in inventory CSV.'); return; }
-  const result = await Vehicle.bulkWrite(ops, { ordered: false });
-  const total = await Vehicle.countDocuments();
-  console.log(`Inventory import done. upserted=${result.upsertedCount || 0}, modified=${result.modifiedCount || 0}, total=${total}`);
-}
+const { fetchAndImportInventory } = require('./utils/inventory');

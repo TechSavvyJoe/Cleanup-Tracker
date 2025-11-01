@@ -30,25 +30,39 @@ export const Button = ({
 
   const variantStyles = {
     primary: `
-      bg-sky-500 text-white hover:bg-sky-600 focus:ring-sky-500
-      shadow-sm hover:shadow-md
+      bg-sky-600 text-white hover:bg-sky-700 focus:ring-sky-600
+      shadow-md hover:shadow-lg active:bg-sky-800
+      font-semibold border-2 border-sky-600 hover:border-sky-700
     `,
     secondary: `
-      bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500
+      bg-slate-100 text-slate-900 hover:bg-slate-200 focus:ring-slate-500
+      border-2 border-slate-200 hover:border-slate-300
+      font-medium shadow-sm hover:shadow
     `,
     success: `
-      bg-emerald-500 text-white hover:bg-emerald-600 focus:ring-emerald-500
+      bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-600
+      shadow-md hover:shadow-lg active:bg-emerald-800
+      font-semibold border-2 border-emerald-600 hover:border-emerald-700
     `,
     danger: `
-      bg-red-500 text-white hover:bg-red-600 focus:ring-red-500
+      bg-red-600 text-white hover:bg-red-700 focus:ring-red-600
+      shadow-md hover:shadow-lg active:bg-red-800
+      font-semibold border-2 border-red-600 hover:border-red-700
+    `,
+    warning: `
+      bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500
+      shadow-md hover:shadow-lg active:bg-amber-700
+      font-semibold border-2 border-amber-500 hover:border-amber-600
     `,
     outline: `
-      bg-transparent border-2 border-sky-500 text-sky-500
-      hover:bg-sky-50 focus:ring-sky-500
+      bg-white border-2 border-sky-600 text-sky-700
+      hover:bg-sky-50 hover:border-sky-700 focus:ring-sky-600
+      font-medium shadow-sm hover:shadow
     `,
     ghost: `
-      bg-transparent text-gray-700 hover:bg-gray-100
-      focus:ring-gray-500
+      bg-transparent text-slate-700 hover:bg-slate-100
+      hover:text-slate-900 focus:ring-slate-500
+      font-medium
     `,
   };
 
@@ -98,9 +112,9 @@ export const Card = ({
   ...props
 }) => {
   const variantStyles = {
-    elevated: 'bg-white shadow-md hover:shadow-lg border border-gray-100',
-    flat: 'bg-gray-50 border border-gray-200',
-    outline: 'bg-white border-2 border-gray-300',
+    elevated: 'bg-white shadow-sm hover:shadow-xl border border-slate-200 hover:border-slate-300',
+    flat: 'bg-slate-50 border border-slate-200',
+    outline: 'bg-white border-2 border-slate-300 hover:border-slate-400',
   };
 
   return (
@@ -108,8 +122,8 @@ export const Card = ({
       className={`
         ${variantStyles[variant]}
         rounded-xl p-6
-        transition-all duration-200
-        ${hoverable ? 'cursor-pointer hover:-translate-y-0.5' : ''}
+        transition-all duration-300 ease-out
+        ${hoverable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-2xl' : ''}
         ${className}
       `}
       {...props}
@@ -177,32 +191,36 @@ export const Input = ({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-semibold text-slate-700 mb-2">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && <span className="text-red-600 ml-1">*</span>}
         </label>
       )}
       <div className="relative">
         {icon && (
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
             {icon}
           </span>
         )}
         <input
           className={`
-            w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg
-            focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100
+            w-full px-4 py-2.5 border-2 border-slate-300 rounded-lg
+            bg-white text-slate-900
+            focus:outline-none focus:border-sky-600 focus:ring-4 focus:ring-sky-100
+            hover:border-slate-400
             transition-all duration-200
-            placeholder-gray-400
+            placeholder-slate-400
+            shadow-sm focus:shadow-md
+            disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed
             ${icon ? 'pl-10' : ''}
-            ${error ? 'border-red-500 focus:border-red-500 focus:ring-red-100' : ''}
+            ${error ? 'border-red-500 focus:border-red-600 focus:ring-red-100' : ''}
             ${className}
           `}
           {...props}
         />
       </div>
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-      {help && <p className="text-gray-500 text-sm mt-1">{help}</p>}
+      {error && <p className="text-red-600 text-sm mt-1.5 font-medium">{error}</p>}
+      {help && <p className="text-slate-600 text-sm mt-1.5">{help}</p>}
     </div>
   );
 };
@@ -222,18 +240,22 @@ export const Select = ({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-semibold text-slate-700 mb-2">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && <span className="text-red-600 ml-1">*</span>}
         </label>
       )}
       <select
         className={`
-          w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg
-          focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100
+          w-full px-4 py-2.5 border-2 border-slate-300 rounded-lg
+          bg-white text-slate-900
+          focus:outline-none focus:border-sky-600 focus:ring-4 focus:ring-sky-100
+          hover:border-slate-400
           transition-all duration-200
-          appearance-none bg-white cursor-pointer
-          ${error ? 'border-red-500 focus:border-red-500 focus:ring-red-100' : ''}
+          appearance-none cursor-pointer
+          shadow-sm focus:shadow-md
+          disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed
+          ${error ? 'border-red-500 focus:border-red-600 focus:ring-red-100' : ''}
           ${className}
         `}
         {...props}
@@ -245,7 +267,7 @@ export const Select = ({
           </option>
         ))}
       </select>
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      {error && <p className="text-red-600 text-sm mt-1.5 font-medium">{error}</p>}
     </div>
   );
 };
@@ -261,11 +283,12 @@ export const Badge = ({
   className = '',
 }) => {
   const variantStyles = {
-    primary: 'bg-sky-100 text-sky-700',
-    success: 'bg-emerald-100 text-emerald-700',
-    warning: 'bg-amber-100 text-amber-700',
-    danger: 'bg-red-100 text-red-700',
-    gray: 'bg-gray-100 text-gray-700',
+    primary: 'bg-sky-100 text-sky-800 border border-sky-200',
+    blue: 'bg-blue-100 text-blue-800 border border-blue-200',
+    success: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+    warning: 'bg-amber-100 text-amber-800 border border-amber-200',
+    danger: 'bg-red-100 text-red-800 border border-red-200',
+    gray: 'bg-slate-100 text-slate-800 border border-slate-200',
   };
 
   const sizeStyles = {

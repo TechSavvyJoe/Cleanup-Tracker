@@ -4,6 +4,8 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+import { API_BASE_URL } from '../config';
+
 // Logging utility
 const Logger = {
   error: (message, error, context = {}) => {
@@ -24,7 +26,7 @@ const SimpleReports = ({ jobs, users, theme }) => {
   useEffect(() => {
     const loadReportData = async () => {
       try {
-        const response = await fetch('/api/v2/reports');
+        const response = await fetch(`${API_BASE_URL}/reports`);
         const data = await response.json();
         
         console.log('Raw API data:', data);
