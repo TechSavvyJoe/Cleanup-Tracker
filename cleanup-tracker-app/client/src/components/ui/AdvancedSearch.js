@@ -15,7 +15,6 @@ export const AdvancedSearchBar = ({
   const [query, setQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({});
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [focused, setFocused] = useState(false);
 
   const handleSearch = useCallback(
     (e) => {
@@ -54,7 +53,6 @@ export const AdvancedSearchBar = ({
             value={query}
             onChange={handleSearch}
             onFocus={() => {
-              setFocused(true);
               setShowSuggestions(query.length > 0);
             }}
             onBlur={() => {
@@ -293,8 +291,10 @@ export const FilterSidebar = ({ filters = [], onChange, onReset }) => {
   );
 };
 
-export default {
+const AdvancedSearchComponents = {
   AdvancedSearchBar,
   SearchResults,
   FilterSidebar,
 };
+
+export default AdvancedSearchComponents;

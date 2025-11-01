@@ -14,7 +14,6 @@ import {
   Modal,
   Alert,
   ProgressBar,
-  Tabs,
   EmptyState,
   Spinner,
 } from '../components/ui/EnterpriseComponents';
@@ -64,7 +63,7 @@ export const EnterpriseJobManager = ({ user }) => {
         ...formData,
         technicianId: user?.id,
       });
-      setJobs([response.data, ...jobs]);
+      setJobs((prev) => [response.data, ...(prev || [])]);
       setIsModalOpen(false);
       addNotification({
         type: 'success',
@@ -96,7 +95,7 @@ export const EnterpriseJobManager = ({ user }) => {
       const response = await V2.put(`/jobs/${jobId}/status`, {
         status: newStatus,
       });
-      setJobs(jobs.map((j) => (j.id === jobId ? response.data : j)));
+      setJobs((prev) => prev.map((j) => (j.id === jobId ? response.data : j)));
       addNotification({
         type: 'success',
         title: 'Status Updated',

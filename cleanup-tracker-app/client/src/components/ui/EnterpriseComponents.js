@@ -3,8 +3,7 @@
  * Professional, reusable UI components for the application
  */
 
-import React, { useState } from 'react';
-import { theme } from '../../styles/theme';
+import React, { useState, useEffect } from 'react';
 
 // ============================================================================
 // BUTTONS
@@ -493,12 +492,51 @@ export const Tabs = ({
   defaultTab = 0,
   onChange,
   className = '',
+  activeTab,
+  renderContent = true,
 }) => {
-  const [activeTab, setActiveTab] = useState(defaultTab);
+  const resolveIndex = (value) => {
+    if (typeof value === 'number') {
+      return Math.max(0, Math.min(tabs.length - 1, value));
+    }
+    if (typeof value === 'string') {
+      const byId = tabs.findIndex((tab) => tab.id === value);
+      if (byId !== -1) {
+        return byId;
+      }
+    }
+    return undefined;
+  };
+
+  const defaultIndex = resolveIndex(defaultTab) ?? 0;
+  const isControlled = activeTab !== undefined;
+  const [internalIndex, setInternalIndex] = useState(
+    resolveIndex(activeTab) ?? defaultIndex
+  );
+
+  useEffect(() => {
+    if (isControlled) {
+      setInternalIndex(resolveIndex(activeTab) ?? 0);
+    }
+  }, [activeTab, isControlled, tabs]);
+
+  useEffect(() => {
+    if (!isControlled) {
+      setInternalIndex(defaultIndex);
+    }
+  }, [defaultIndex, isControlled, tabs.length]);
+
+  const currentIndex = isControlled
+    ? resolveIndex(activeTab) ?? 0
+    : internalIndex;
 
   const handleTabChange = (index) => {
-    setActiveTab(index);
-    onChange?.(index);
+    if (!isControlled) {
+      setInternalIndex(index);
+    }
+    const tab = tabs[index];
+    const identifier = tab?.id ?? index;
+    onChange?.(identifier, index);
   };
 
   return (
@@ -523,9 +561,11 @@ export const Tabs = ({
       </div>
 
       {/* Tab Content */}
-      <div className="mt-6">
-        {tabs[activeTab]?.content}
-      </div>
+      {renderContent && tabs[currentIndex]?.content && (
+        <div className="mt-6">
+          {tabs[currentIndex].content}
+        </div>
+      )}
     </div>
   );
 };
@@ -634,7 +674,7 @@ export const Grid = ({
   );
 };
 
-export default {
+const EnterpriseComponents = {
   Button,
   Card,
   StatCard,
@@ -649,3 +689,5 @@ export default {
   EmptyState,
   Grid,
 };
+
+export default EnterpriseComponents;

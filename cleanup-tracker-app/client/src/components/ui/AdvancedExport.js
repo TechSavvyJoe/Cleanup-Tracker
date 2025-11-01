@@ -166,17 +166,23 @@ export const ExportDialog = ({ data = [], columns = [], onClose, title = 'Export
 // EXPORT FUNCTIONS
 // ============================================================================
 
-const exportCSV = (data, columns) => {
+const buildCsv = (data, columns) => {
   const headers = columns.map((c) => c.label).join(',');
   const rows = data.map((row) =>
-    columns.map((col) => {
-      const value = row[col.key];
-      const stringValue = String(value || '');
-      return stringValue.includes(',') ? `"${stringValue}"` : stringValue;
-    }).join(',')
+    columns
+      .map((col) => {
+        const value = row[col.key];
+        const stringValue = String(value ?? '');
+        return stringValue.includes(',') ? `"${stringValue}"` : stringValue;
+      })
+      .join(',')
   );
 
-  const csv = [headers, ...rows].join('\n');
+  return [headers, ...rows].join('\n');
+};
+
+const exportCSV = (data, columns) => {
+  const csv = buildCsv(data, columns);
   downloadFile(csv, 'export.csv', 'text/csv');
 };
 
@@ -186,9 +192,9 @@ const exportJSON = (data) => {
 };
 
 const exportExcel = (data, columns) => {
-  // Simple Excel generation (in production, use a library like xlsx)
-  const csv = exportCSV(data, columns);
-  downloadFile(csv, 'export.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  // Simple Excel-compatible CSV (for a true XLSX export, integrate a library such as xlsx)
+  const csv = buildCsv(data, columns);
+  downloadFile(csv, 'export.xlsx', 'text/csv');
 };
 
 const exportPDF = (data, columns) => {
@@ -311,7 +317,9 @@ export const ReportTemplate = ({ title, sections = [] }) => {
   );
 };
 
-export default {
+const AdvancedExport = {
   ExportDialog,
   ReportTemplate,
 };
+
+export default AdvancedExport;

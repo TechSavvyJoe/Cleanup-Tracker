@@ -341,8 +341,10 @@ const formatTime = (date) => {
   return new Date(date).toLocaleDateString();
 };
 
-export default {
+const AuditLogComponents = {
   AuditLogViewer,
   ActivityTimeline,
   ComplianceReport,
 };
+
+export default AuditLogComponents;

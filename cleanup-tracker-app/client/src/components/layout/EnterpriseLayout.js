@@ -283,10 +283,12 @@ export const Grid = ({
   );
 };
 
-export default {
+const Layout = {
   Sidebar,
   Header,
   MainLayout,
   PageContainer,
   Grid,
 };
+
+export default Layout;

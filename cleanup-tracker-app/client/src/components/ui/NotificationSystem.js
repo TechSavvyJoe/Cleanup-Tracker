@@ -14,6 +14,10 @@ const NotificationContext = React.createContext();
 export const NotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
 
+  const removeNotification = useCallback((id) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
   const addNotification = useCallback((notification) => {
     const id = Date.now();
     const notif = {
@@ -32,11 +36,7 @@ export const NotificationProvider = ({ children }) => {
     }
 
     return id;
-  }, []);
-
-  const removeNotification = useCallback((id) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }, []);
+  }, [removeNotification]);
 
   return (
     <NotificationContext.Provider value={{ addNotification, removeNotification }}>
@@ -330,10 +330,12 @@ const formatTime = (date) => {
   return new Date(date).toLocaleDateString();
 };
 
-export default {
+const NotificationSystem = {
   NotificationProvider,
   useNotification,
   NotificationToast,
   NotificationCenter,
   NotificationBell,
 };
+
+export default NotificationSystem;

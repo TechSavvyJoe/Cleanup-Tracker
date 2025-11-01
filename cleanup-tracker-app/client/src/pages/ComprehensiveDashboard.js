@@ -3,7 +3,7 @@
  * Fully integrated with all advanced features, real data binding, and working components
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   AdvancedMetricCard,
   AdvancedProgressRing,
@@ -28,7 +28,6 @@ export const ComprehensiveDashboard = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [timeRange, setTimeRange] = useState('30days');
-  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -36,36 +35,7 @@ export const ComprehensiveDashboard = ({ user }) => {
   const [auditLogs, setAuditLogs] = useState([]);
 
   // ==================== DATA FETCHING ====================
-  useEffect(() => {
-    fetchAllData();
-  }, [timeRange]);
-
-  const fetchAllData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const [reportsRes, jobsRes, usersRes] = await Promise.all([
-        V2.get('/reports'),
-        V2.get('/jobs?limit=100'),
-        V2.get('/users'),
-      ]);
-
-      setStats(reportsRes.data);
-      setJobs(jobsRes.data || []);
-      setUsers(usersRes.data || []);
-
-      // Generate mock audit logs
-      generateAuditLogs(jobsRes.data || []);
-    } catch (err) {
-      setError('Failed to load dashboard data: ' + (err.message || 'Unknown error'));
-      console.error('Error fetching data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const generateAuditLogs = (jobsData) => {
+  const generateAuditLogs = useCallback((jobsData = []) => {
     const logs = jobsData.slice(0, 10).map((job, idx) => ({
       id: job.id || idx,
       action: ['CREATE', 'UPDATE', 'COMPLETE'][idx % 3],
@@ -83,7 +53,35 @@ export const ComprehensiveDashboard = ({ user }) => {
     }));
 
     setAuditLogs(logs);
-  };
+  }, []);
+
+  const fetchAllData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [reportsRes, jobsRes, usersRes] = await Promise.all([
+        V2.get('/reports', { params: { range: timeRange } }),
+        V2.get('/jobs', { params: { limit: 100, range: timeRange } }),
+        V2.get('/users'),
+      ]);
+
+      setStats(reportsRes.data);
+      setJobs(jobsRes.data || []);
+      setUsers(usersRes.data || []);
+
+      generateAuditLogs(jobsRes.data || []);
+    } catch (err) {
+      setError('Failed to load dashboard data: ' + (err.message || 'Unknown error'));
+      console.error('Error fetching data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [generateAuditLogs, timeRange]);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData]);
 
   // ==================== SEARCH FUNCTIONALITY ====================
   const handleSearch = (query, filters) => {
@@ -130,7 +128,7 @@ export const ComprehensiveDashboard = ({ user }) => {
   const handleCreateJob = async (jobData) => {
     try {
       const response = await V2.post('/jobs', jobData);
-      setJobs([response.data, ...jobs]);
+      setJobs((prev) => [response.data, ...(prev || [])]);
       addAuditLog('CREATE', `Job created: ${jobData.vehicleDescription}`, 'success');
       addNotification({
         type: 'success',
@@ -156,7 +154,7 @@ export const ComprehensiveDashboard = ({ user }) => {
   const handleUpdateJob = async (jobId, updates) => {
     try {
       const response = await V2.put(`/jobs/${jobId}`, updates);
-      setJobs(jobs.map((j) => (j.id === jobId ? response.data : j)));
+      setJobs((prev) => prev.map((j) => (j.id === jobId ? response.data : j)));
       addAuditLog('UPDATE', `Job updated: ${jobId}`, 'success');
       addNotification({
         type: 'info',
@@ -183,7 +181,7 @@ export const ComprehensiveDashboard = ({ user }) => {
     if (window.confirm('Are you sure you want to delete this job?')) {
       try {
         await V2.delete(`/jobs/${jobId}`);
-        setJobs(jobs.filter((j) => j.id !== jobId));
+        setJobs((prev) => prev.filter((j) => j.id !== jobId));
         addAuditLog('DELETE', `Job deleted: ${jobId}`, 'success');
         addNotification({
           type: 'warning',
@@ -219,7 +217,7 @@ export const ComprehensiveDashboard = ({ user }) => {
       details: { timestamp: new Date().toISOString() },
     };
 
-    setAuditLogs([newLog, ...auditLogs]);
+    setAuditLogs((prev) => [newLog, ...prev]);
   };
 
   // ==================== RENDER ====================

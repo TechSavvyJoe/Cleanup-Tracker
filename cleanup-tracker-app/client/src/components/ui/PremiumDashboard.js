@@ -4,7 +4,7 @@
  * $100M-level design and functionality
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 // ============================================================================
 // ADVANCED METRIC CARD WITH TREND ANALYSIS
@@ -531,10 +531,12 @@ export const ComparisonChart = ({
   );
 };
 
-export default {
+const PremiumDashboardComponents = {
   AdvancedMetricCard,
   AdvancedProgressRing,
   AdvancedDataTable,
   RealTimeActivityFeed,
   ComparisonChart,
 };
+
+export default PremiumDashboardComponents;

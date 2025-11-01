@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { V2 } from './utils/v2Client';
 import { MainLayout } from './components/Layout/EnterpriseLayout';
 import { NotificationProvider } from './components/ui/NotificationSystem';
@@ -79,7 +79,17 @@ function App() {
     <NotificationProvider>
       <Router>
         <Routes>
-          <Route path="/login" element={<LoginPage onLogin={handleLogin} isLoading={isLoading} error={loginError} />} />
+          <Route
+            path="/login"
+            element={
+              <LoginRoute
+                user={user}
+                onLogin={handleLogin}
+                isLoading={isLoading}
+                error={loginError}
+              />
+            }
+          />
           <Route
             path="/*"
             element={
@@ -102,10 +112,6 @@ const MainApp = ({ user, onLogout }) => {
     setCurrentPage(location.pathname.substring(1) || 'dashboard');
   }, [location]);
 
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
-  };
-
   return (
     <MainLayout
       user={user}
@@ -124,6 +130,13 @@ const MainApp = ({ user, onLogout }) => {
       </Routes>
     </MainLayout>
   );
+};
+
+const LoginRoute = ({ user, onLogin, isLoading, error }) => {
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <LoginPage onLogin={onLogin} isLoading={isLoading} error={error} />;
 };
 
 export default App;
