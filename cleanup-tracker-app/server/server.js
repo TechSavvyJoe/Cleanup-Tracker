@@ -154,6 +154,7 @@ app.get('*', (req, res) => {
 
 // Try to listen on process.env.PORT or default 5051, increment on conflict
 let startPort = parseInt(process.env.PORT, 10) || 5051;
+const maxPort = startPort + 100;
 
 // Seed default users if none exist
 async function seedUsersIfNeeded() {
@@ -202,7 +203,6 @@ main().catch(err => {
   console.error('Fatal startup error:', err);
   process.exit(1);
 });
-const maxPort = startPort + 100;
 
 function startServer(portToTry) {
   const serverInstance = app.listen(portToTry, () => {

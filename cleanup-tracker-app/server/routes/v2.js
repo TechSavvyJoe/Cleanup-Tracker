@@ -349,7 +349,7 @@ router.post('/auth/login', async (req, res) => {
   try {
     const { employeeId, pin } = req.body || {};
     const identifier = typeof employeeId === 'string' ? employeeId.trim() : '';
-    const submittedPin = typeof pin === 'string' ? pin.trim() : identifier;
+    const submittedPin = typeof pin === 'string' ? pin.trim() : '';
 
     if (!submittedPin) {
       return res.status(400).json({ error: 'PIN required' });
@@ -497,73 +497,115 @@ router.put('/settings', async (req, res) => {
 
 // Users
 router.get('/users', async (req, res) => {
-  const users = await V2User.find();
-  res.json(users.map(sanitizeUser));
+  try {
+    const users = await V2User.find();
+    res.json(users.map(sanitizeUser));
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
 
 router.post('/users', async (req, res) => {
-  const { name, pin, role = 'detailer', employeeNumber, phoneNumber, department, uid } = req.body || {};
-  if (!name || !pin) {
-    return res.status(400).json({ error: 'name and pin are required' });
+  try {
+    const { name, pin, role = 'detailer', employeeNumber, phoneNumber, department, uid } = req.body || {};
+    if (!name || !pin) {
+      return res.status(400).json({ error: 'name and pin are required' });
+    }
+
+    // Validate role
+    const validRoles = ['manager', 'detailer', 'salesperson'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+    }
+
+    if (await isPinInUse(pin)) {
+      return res.status(409).json({ error: 'PIN already in use' });
+    }
+
+    const user = new V2User({
+      name: name.trim(),
+      role,
+      employeeNumber: employeeNumber ? String(employeeNumber).toUpperCase() : undefined,
+      phoneNumber,
+      department,
+      uid: uid || (role === 'detailer' ? `detailer-${Date.now()}` : undefined)
+    });
+
+    user.pin = pin;
+    await user.save();
+
+    res.status(201).json(sanitizeUser(user));
+  } catch (error) {
+    console.error('Failed to create user:', error);
+    res.status(500).json({ error: error.message || 'Failed to create user' });
   }
-
-  if (await isPinInUse(pin)) {
-    return res.status(409).json({ error: 'PIN already in use' });
-  }
-
-  const user = new V2User({
-    name: name.trim(),
-    role,
-    employeeNumber: employeeNumber ? String(employeeNumber).toUpperCase() : undefined,
-    phoneNumber,
-    department,
-    uid: uid || (role === 'detailer' ? `detailer-${Date.now()}` : undefined)
-  });
-
-  user.pin = pin;
-  await user.save();
-
-  res.status(201).json(sanitizeUser(user));
 });
 
 router.put('/users/:id', async (req, res) => {
-  const { name, pin, employeeNumber, phoneNumber, department, role, isActive } = req.body || {};
-  const { id } = req.params;
+  try {
+    const { name, pin, employeeNumber, phoneNumber, department, role, isActive } = req.body || {};
+    const { id } = req.params;
 
-  const user = await V2User.findById(id);
-  if (!user) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-
-  if (pin) {
-    if (await isPinInUse(pin, id)) {
-      return res.status(409).json({ error: 'PIN already in use' });
+    const user = await V2User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
-    user.pin = pin;
-  }
 
-  if (name !== undefined) user.name = name;
-  if (employeeNumber !== undefined) {
-    user.employeeNumber = employeeNumber ? String(employeeNumber).toUpperCase() : undefined;
-  }
-  if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
-  if (department !== undefined) user.department = department;
-  if (role !== undefined) user.role = role;
-  if (typeof isActive === 'boolean') user.isActive = isActive;
+    // Validate role if provided
+    if (role !== undefined) {
+      const validRoles = ['manager', 'detailer', 'salesperson'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      }
+    }
 
-  await user.save();
-  res.json(sanitizeUser(user));
+    if (pin) {
+      if (await isPinInUse(pin, id)) {
+        return res.status(409).json({ error: 'PIN already in use' });
+      }
+      user.pin = pin;
+    }
+
+    if (name !== undefined) user.name = name;
+    if (employeeNumber !== undefined) {
+      user.employeeNumber = employeeNumber ? String(employeeNumber).toUpperCase() : undefined;
+    }
+    if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+    if (department !== undefined) user.department = department;
+    if (role !== undefined) user.role = role;
+    if (typeof isActive === 'boolean') user.isActive = isActive;
+
+    await user.save();
+    res.json(sanitizeUser(user));
+  } catch (error) {
+    console.error('Failed to update user:', error);
+    res.status(500).json({ error: error.message || 'Failed to update user' });
+  }
 });
 
 router.delete('/users/:id', async (req, res) => {
-  await V2User.findByIdAndDelete(req.params.id);
-  res.status(204).end();
+  try {
+    const result = await V2User.findByIdAndDelete(req.params.id);
+    if (!result) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.status(204).end();
+  } catch (error) {
+    console.error('Failed to delete user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
 });
 
 // Jobs
 router.get('/jobs', async (req, res) => {
-  const jobs = await Job.find().sort({ startTime: -1 });
-  res.json(jobs.map(jobToResponse));
+  try {
+    const jobs = await Job.find().sort({ startTime: -1 });
+    res.json(jobs.map(jobToResponse));
+  } catch (error) {
+    console.error('Failed to fetch jobs:', error);
+    res.status(500).json({ error: 'Failed to fetch jobs' });
+  }
 });
 
 router.post('/jobs', async (req, res) => {
@@ -574,6 +616,18 @@ router.post('/jobs', async (req, res) => {
       year, make, model, vehicleColor
     } = req.body;
 
+    // Parse date - handle string dates like "2025-01-15" or Date objects
+    let jobDate;
+    if (date) {
+      jobDate = typeof date === 'string' ? new Date(date) : new Date(date);
+      // If date is invalid, use today
+      if (isNaN(jobDate.getTime())) {
+        jobDate = new Date();
+      }
+    } else {
+      jobDate = new Date();
+    }
+
     const jobData = {
       technicianId: technicianId || 'unknown',
       technicianName: technicianName || 'Unknown Technician',
@@ -581,7 +635,7 @@ router.post('/jobs', async (req, res) => {
       stockNumber: stockNumber || '',
       vehicleDescription: vehicleDescription || 'Unknown Vehicle',
       serviceType: serviceType || 'Cleanup',
-      date: date || new Date().toISOString().split('T')[0],
+      date: jobDate,
       status: 'In Progress',
       startTime: new Date(),
       expectedDuration: 60,
@@ -609,29 +663,39 @@ router.post('/jobs', async (req, res) => {
 });
 
 router.put('/jobs/:id/complete', async (req, res) => {
-  const job = await Job.findById(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Not found' });
-  const end = new Date();
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const end = new Date();
 
-  job.status = job.qcRequired ? 'QC Required' : 'Completed';
-  job.qcRequired = job.status === 'QC Required';
-  job.endTime = end;
-  job.completedAt = end;
-  job.duration = computeJobDuration(job, end);
-  await job.save();
-  res.json(jobToResponse(job));
+    job.status = job.qcRequired ? 'QC Required' : 'Completed';
+    job.qcRequired = job.status === 'QC Required';
+    job.endTime = end;
+    job.completedAt = end;
+    job.duration = computeJobDuration(job, end);
+    await job.save();
+    res.json(jobToResponse(job));
+  } catch (error) {
+    console.error('Failed to complete job:', error);
+    res.status(500).json({ error: 'Failed to complete job' });
+  }
 });
 
 async function handlePauseJob(req, res) {
-  const { reason } = req.body;
-  const job = await Job.findById(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Not found' });
-  
-  job.status = 'Paused';
-  job.pausedAt = new Date();
-  job.pauseReason = reason || 'Paused by user';
-  await job.save();
-  res.json(jobToResponse(job));
+  try {
+    const { reason } = req.body;
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    job.status = 'Paused';
+    job.pausedAt = new Date();
+    job.pauseReason = reason || 'Paused by user';
+    await job.save();
+    res.json(jobToResponse(job));
+  } catch (error) {
+    console.error('Failed to pause job:', error);
+    res.status(500).json({ error: 'Failed to pause job' });
+  }
 }
 
 // Pause job
@@ -640,35 +704,49 @@ router.post('/jobs/:id/pause', handlePauseJob);
 
 // Resume job
 router.put('/jobs/:id/resume', async (req, res) => {
-  const job = await Job.findById(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Not found' });
-  
-  job.status = 'In Progress';
-  job.resumedAt = new Date();
-  await job.save();
-  res.json(jobToResponse(job));
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    job.status = 'In Progress';
+    job.resumedAt = new Date();
+    await job.save();
+    res.json(jobToResponse(job));
+  } catch (error) {
+    console.error('Failed to resume job:', error);
+    res.status(500).json({ error: 'Failed to resume job' });
+  }
 });
 
 async function handleAddTechnician(req, res) {
-  const { technicianId } = req.body;
-  const job = await Job.findById(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Not found' });
-  
-  const technician = await V2User.findById(technicianId);
-  if (!technician) return res.status(404).json({ error: 'Technician not found' });
-  
-  if (!job.assignedTechnicianIds.includes(technicianId)) {
-    job.assignedTechnicianIds.push(technicianId);
+  try {
+    const { technicianId } = req.body;
+    if (!technicianId) {
+      return res.status(400).json({ error: 'technicianId required' });
+    }
+
+    const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    const technician = await V2User.findById(technicianId);
+    if (!technician) return res.status(404).json({ error: 'Technician not found' });
+
+    if (!job.assignedTechnicianIds.includes(technicianId)) {
+      job.assignedTechnicianIds.push(technicianId);
+    }
+
+    job.activeTechnicians.push({
+      technicianId,
+      technicianName: technician.name,
+      startTime: new Date()
+    });
+
+    await job.save();
+    res.json(jobToResponse(job));
+  } catch (error) {
+    console.error('Failed to add technician to job:', error);
+    res.status(500).json({ error: 'Failed to add technician' });
   }
-  
-  job.activeTechnicians.push({
-    technicianId,
-    technicianName: technician.name,
-    startTime: new Date()
-  });
-  
-  await job.save();
-  res.json(jobToResponse(job));
 }
 
 // Add technician to job

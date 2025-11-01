@@ -45,7 +45,7 @@ const jobSchema = new mongoose.Schema({
         min: 0
     },
     date: {
-        type: String,
+        type: Date,
         index: true
     },
     priority: {
@@ -113,6 +113,7 @@ jobSchema.index({ vin: 1, status: 1 });
 jobSchema.index({ date: 1, status: 1 });
 jobSchema.index({ serviceType: 1, status: 1 });
 jobSchema.index({ priority: 1, status: 1, startTime: 1 });
+jobSchema.index({ createdAt: 1 }); // For reports queries
 
 // Virtual for duration calculation
 jobSchema.virtual('durationMinutes').get(function() {

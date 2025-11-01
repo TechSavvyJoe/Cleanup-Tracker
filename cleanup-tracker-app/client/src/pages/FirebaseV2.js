@@ -56,6 +56,24 @@ const Logger = {
     const start = performance.now();
     try {
       const result = fn();
+
+      // Handle async functions that return Promises
+      if (result && typeof result.then === 'function') {
+        return result
+          .then(value => {
+            const duration = performance.now() - start;
+            if (duration > 100) {
+              Logger.warn(`Slow operation: ${label}`, { duration: `${duration.toFixed(2)}ms` });
+            }
+            return value;
+          })
+          .catch(error => {
+            Logger.error(`Performance tracking failed for ${label}`, error);
+            throw error;
+          });
+      }
+
+      // Handle synchronous functions
       const duration = performance.now() - start;
       if (duration > 100) {
         Logger.warn(`Slow operation: ${label}`, { duration: `${duration.toFixed(2)}ms` });

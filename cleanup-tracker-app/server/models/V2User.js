@@ -27,7 +27,15 @@ const V2UserSchema = new Schema({
     pin: {
         type: String,
         trim: true,
-        index: true
+        index: true,
+        validate: {
+            validator: function(v) {
+                // PIN must be 4-8 digits if provided
+                if (!v) return true; // Optional field
+                return /^[0-9]{4,8}$/.test(v);
+            },
+            message: 'PIN must be 4-8 digits'
+        }
     },
     pinHash: {
         type: String

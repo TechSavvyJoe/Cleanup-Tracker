@@ -7,7 +7,7 @@
   "scripts": {
     "dev:client": "cd cleanup-tracker-app/client && npm start",
     "build": "cd cleanup-tracker-app/client && npm run build",
-  "dev:pages": "cd cleanup-tracker-app && npx wrangler@4 pages dev client/build --local --port=8788",
+    "dev:pages": "cd cleanup-tracker-app && npx wrangler@4 pages dev client/build --local --port=8788",
     "dev:server-express": "cd cleanup-tracker-app/server && PORT=5051 npm start",
     "dev:all": "concurrently -k -n PAGES,SERVER,CLIENT -c blue,magenta,green \"npm:dev:pages\" \"npm:dev:server-express\" \"npm:dev:client\""
   },
